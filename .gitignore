@@ -219,3 +219,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Claude Code: personal/local settings (do not commit)
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Secrets and keys
+*.pem
+*.key
+secrets/
+
+# Local-only notes (personal info must never be committed)
+private/
+
+# OS files
+.DS_Store
+Thumbs.db
+
