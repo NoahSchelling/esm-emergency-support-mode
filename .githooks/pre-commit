@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: scan staged changes for credentials and personal data.
+# Enabled with: git config core.hooksPath .githooks
+# (the Claude Code SessionStart hook runs this automatically).
+root=$(git rev-parse --show-toplevel) || exit 2
+exec bash "$root/scripts/check-secrets.sh" --staged
