@@ -1,0 +1,44 @@
+{
+  "20261103054210_0_VXSE51_010000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:55Z",
+    "http_date": "Wed, 04 Nov 2026 05:43:05 GMT",
+    "title": "震度速報",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261103054210_0_VXSE51_010000.xml"
+  },
+  "20261103054323_0_VXSE52_010000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:55Z",
+    "http_date": "Wed, 04 Nov 2026 05:45:04 GMT",
+    "title": "震源に関する情報",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261103054323_0_VXSE52_010000.xml"
+  },
+  "20261103054436_0_VXSE53_010000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:55Z",
+    "http_date": "Wed, 04 Nov 2026 05:46:04 GMT",
+    "title": "震源・震度に関する情報",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261103054436_0_VXSE53_010000.xml"
+  },
+  "20261103223117_0_VXSE53_270000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:55Z",
+    "http_date": "Tue, 03 Nov 2026 22:32:09 GMT",
+    "title": "震源・震度に関する情報",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261103223117_0_VXSE53_270000.xml"
+  },
+  "20261104072446_0_VPWW58_080000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:56Z",
+    "http_date": "Wed, 04 Nov 2026 07:28:50 GMT",
+    "title": "気象警報・注意報（Ｒ０６）（暴風）",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261104072446_0_VPWW58_080000.xml"
+  },
+  "20261104083146_0_VPWW61_340000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:55Z",
+    "http_date": "Wed, 04 Nov 2026 08:32:40 GMT",
+    "title": "気象警報・注意報（Ｒ０６）（その他注意報）",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261104083146_0_VPWW61_340000.xml"
+  },
+  "20261104094324_0_VPWW61_220000.xml": {
+    "fetched_at_utc": "2026-11-04T10:45:55Z",
+    "http_date": "Wed, 04 Nov 2026 09:45:17 GMT",
+    "title": "気象警報・注意報（Ｒ０６）（その他注意報）",
+    "url": "https://www.data.jma.go.jp/developer/xml/data/20261104094324_0_VPWW61_220000.xml"
+  }
+}
