@@ -29,7 +29,10 @@ git config core.hooksPath .githooks
 | 防災情報 XML（Atom フィードと電文） | 気象庁 | 試作 C-A が動いているあいだに取得して表示する。リポジトリには保存していない。 |
 | 防災情報 XML のサンプル（地震情報 1 件、気象警報 1 件、Atom フィード 1 件。加工なし） | 出典：気象庁ホームページ（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。 |
 | 防災情報 XML の電文（地震情報 4 件、気象警報・注意報 3 件。加工なし） | 出典：気象庁ホームページ（取得元の URL は `proto/c-b/bulletins/README.md`） | 試作 C-B の言い換えの例文と照合に使うため、`proto/c-b/bulletins/` に保存している。画面での言い換えと原文の切り出しは、本プロジェクトが加工して作成したもの。 |
+| キキクルの時刻の一覧（1 件。加工なし） | 出典：気象庁ホームページ（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。 |
+| 暑さ指数（WBGT）の地点別予測値（1 件。加工なし） | 出典：環境省熱中症予防情報サイト（環境省）（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。提供期間が終わったあとの古いデータ。 |
+| 重ねるハザードマップの WMTS メタデータ（1 件。加工なし） | 出典：「ハザードマップポータルサイト」（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。 |
 
-気象庁のデータの利用条件は `docs/research/jma_data.md` の 4 章にまとめています。
+気象庁のデータの利用条件は `docs/research/jma_data.md` の 4 章に、気象庁防災情報 XML 以外の公的な防災データの取得方法と利用条件は `docs/research/other_data.md` にまとめています。
 
 試作 C-A の模擬データは、プログラムが作る架空のデータで、外部から持ち込んだものではありません。
