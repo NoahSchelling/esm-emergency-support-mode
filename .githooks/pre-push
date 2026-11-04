@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Git pre-push hook: scan the commits that are about to be pushed.
+# Enabled with: git config core.hooksPath .githooks
+# (the Claude Code SessionStart hook runs this automatically).
+#
+# Git passes "<local ref> <local sha> <remote ref> <remote sha>" lines on
+# stdin. Every local sha being pushed (deletions excluded) is handed to
+# scripts/check-secrets.sh, which scans the commits not yet on any remote.
+
+root=$(git rev-parse --show-toplevel) || exit 2
+
+tips=()
+zero_re='^0+$'
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -z "${local_sha:-}" ]] && continue
+  # A deleted remote ref has an all-zero local sha; nothing to scan.
+  [[ "$local_sha" =~ $zero_re ]] && continue
+  tips+=("$local_sha")
+done
+
+if ((${#tips[@]} == 0)); then
+  echo "check-secrets: プッシュするコミットがないため検査を省略しました（参照の削除のみ）" >&2
+  exit 0
+fi
+
+exec bash "$root/scripts/check-secrets.sh" --push "${tips[@]}"
