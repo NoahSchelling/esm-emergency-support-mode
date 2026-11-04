@@ -6,6 +6,9 @@
 #   scripts/check-secrets.sh            # same as --staged
 #   scripts/check-secrets.sh --staged   # scan the index (git diff --cached)
 #   scripts/check-secrets.sh --push     # scan commits not yet on any remote
+#   scripts/check-secrets.sh --push <commit>...
+#                                       # same, starting from the given commits
+#                                       # instead of HEAD (used by pre-push)
 #
 # Exit status:
 #   0  no blocking problem found (warnings may still be printed)
@@ -27,17 +30,26 @@ die() {
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/check-secrets.sh [--staged | --push]
+Usage: scripts/check-secrets.sh [--staged | --push [<commit>...]]
   --staged  ステージされた変更を検査する（既定）
   --push    まだリモートにないコミットの差分を検査する
+            <commit> を渡すと HEAD の代わりにそのコミットから辿る
 環境変数 ESM_DENYLIST_FILE: 個人語（禁止語）を 1 行 1 語で書いたファイル（リポジトリ外）
 EOF
 }
 
 mode="staged"
+push_tips=()
 case "${1:-}" in
-  "" | --staged) mode="staged" ;;
-  --push) mode="push" ;;
+  "" | --staged)
+    mode="staged"
+    (($# > 1)) && { usage; die "--staged は引数を取りません"; }
+    ;;
+  --push)
+    mode="push"
+    shift
+    push_tips=("$@")
+    ;;
   -h | --help) usage; exit 0 ;;
   *) usage; die "不明な引数: $1" ;;
 esac
@@ -208,10 +220,15 @@ if [[ "$mode" == "staged" ]]; then
   names_cmd=("${git_q[@]}" diff --cached --name-only -M --diff-filter=ACMR)
   scope="ステージされた変更"
 else
-  if git rev-parse --verify -q HEAD >/dev/null; then
+  revs=()
+  if ((${#push_tips[@]} > 0)); then
+    for t in "${push_tips[@]}"; do
+      sha=$(git rev-parse --verify -q "$t^{commit}") || die "コミットとして解決できません: $t"
+      revs+=("$sha")
+    done
+    revs+=(--not --remotes)
+  elif git rev-parse --verify -q HEAD >/dev/null; then
     revs=(HEAD --not --remotes)
-  else
-    revs=()
   fi
   diff_cmd=("${git_q[@]}" log --no-color --no-ext-diff -p -U0 -M --diff-merges=first-parent
     --diff-filter=ACMR --format='commit %H' "${revs[@]}")
