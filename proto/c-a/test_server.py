@@ -56,6 +56,14 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(d["areas"], ["地域1", "地域2"])
         self.assertEqual(d["report_datetime"], 1793750400000)
 
+    def test_parse_detail_uses_first_information_block_only(self):
+        # Shape seen in a real warning message on 2026-11-04 (names replaced).
+        xml = ('<Report><Control><Status>通常</Status></Control><Head><Headline>'
+               '<Information type="p"><Item><Areas><Area><Name>県</Name></Area></Areas></Item></Information>'
+               '<Information type="c"><Item><Areas><Area><Name>市</Name></Area></Areas></Item></Information>'
+               '</Headline></Head></Report>').encode("utf-8")
+        self.assertEqual(server.parse_detail(xml)["areas"], ["県"])
+
     def test_naive_time_is_rejected(self):
         self.assertIsNone(server.parse_time_ms("2026-11-04T09:00:00"))
 
