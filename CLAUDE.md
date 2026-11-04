@@ -76,4 +76,5 @@
 - 手元のフックは、GitHub の画面での編集（衝突の解消やファイルの編集）を検査できない。そのため GitHub Actions でも同じ検査を走らせる（三重の守り）。CI は、ベースのブランチ（または main）にある版の検査スクリプトと、変更に含まれる版の両方で検査する（変更が自分の検査を止められないようにするため）。
 - CI の個人語の検査は、main への push のときだけ、Environment `personal-words` の Secrets に登録した `ESM_DENYLIST`（1 行 1 語）で行う。登録がないときは CI を失敗にする。PR では個人語の検査をしない（PR の中でワークフローを書き換えると、Secrets を読み出せてしまうため）。
 - GitHub の MCP の書き込み系の道具（`push_files`、`create_or_update_file`）は、手元のフックを通らないので `.claude/settings.json` で使えなくしている。
+- 公開の前後に人が行う作業（最終確認、公開した直後の Secret scanning と push protection の有効化）は `docs/release/publish-checklist.md` にまとめている。公開に関わる作業をするときは、先に読む。
 - 検査を通すためにフックを外す（`--no-verify` など）ことはしない。誤検出のときは内容を直すか、検査スクリプトを直す。
