@@ -30,8 +30,8 @@ STATIC_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
 }
 
-# Feed URLs are from prior knowledge and NOT verified yet
-# (see docs/research/jma_data.md, section 2).
+# Feed URLs were fetched successfully on 2026-11-04
+# (see docs/research/jma_data.md, section 1.2).
 FEEDS = [
     ("extra", "随時（気象警報など）", "https://www.data.jma.go.jp/developer/xml/feed/extra.xml"),
     ("eqvol", "地震火山", "https://www.data.jma.go.jp/developer/xml/feed/eqvol.xml"),
@@ -117,16 +117,22 @@ def parse_detail(data):
     root = ET.fromstring(data)
     control = child(root, "Control")
     head = child(root, "Head")
+    # Area names from the first Headline/Information block that has any.
+    # In real warning messages (checked 2026-11-04) the first block is the
+    # broadest level (prefecture); later blocks repeat finer levels.
     areas = []
     headline = child(head, "Headline")
-    if headline is not None:
-        for el in headline.iter():
+    for info in (headline if headline is not None else []):
+        if local_name(info.tag) != "Information":
+            continue
+        for el in info.iter():
             if local_name(el.tag) == "Area":
                 name = child_text(el, "Name")
                 if name and name not in areas:
                     areas.append(name)
-                if len(areas) >= 20:
-                    break
+        if areas:
+            break
+    areas = areas[:20]
     return {
         "status": child_text(control, "Status"),
         "title": child_text(head, "Title"),
@@ -362,7 +368,6 @@ class Monitor:
                 else:
                     data = source.fetch_feed(name, f["url"])
                 changed = False
-                new_entries = []
                 if data is not None:
                     feed_updated, entries = parse_atom(data)
                     with self.lock:
@@ -374,7 +379,6 @@ class Monitor:
                                 e["feed"] = name
                                 e["first_seen"] = t
                                 self.entries[e["id"]] = e
-                                new_entries.append(e)
                                 changed = True
                 with self.lock:
                     f["last_ok_at"] = t
@@ -382,13 +386,14 @@ class Monitor:
                     if changed:
                         f["last_changed_at"] = t
                         self.last_received_at = t
-                self._fetch_details(source, new_entries)
             except Exception as e:
                 all_ok = False
                 msg = "%s: %s" % (type(e).__name__, e)
                 errors.append("%s: %s" % (name, msg))
                 with self.lock:
                     f["error"] = msg
+        if stall != "freeze":
+            self._fetch_details(source)
         with self.lock:
             if all_ok:
                 self.last_fetch_ok_at = t
@@ -400,9 +405,12 @@ class Monitor:
             self._trim()
         return all_ok
 
-    def _fetch_details(self, source, new_entries):
-        new_entries = sorted(new_entries, key=lambda e: e["updated"] or 0, reverse=True)
-        for e in new_entries[:MAX_DETAILS_PER_POLL]:
+    def _fetch_details(self, source):
+        """Fetch details for the newest entries that do not have one yet."""
+        with self.lock:
+            todo = sorted((e for e in self.entries.values() if e["id"] not in self.details),
+                          key=lambda e: e["updated"] or 0, reverse=True)[:MAX_DETAILS_PER_POLL]
+        for e in todo:
             try:
                 raw = source.fetch_detail(e["link"])
                 d = dict(raw) if isinstance(raw, dict) else parse_detail(raw)
