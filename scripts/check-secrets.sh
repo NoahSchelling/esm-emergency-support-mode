@@ -9,6 +9,12 @@
 #   scripts/check-secrets.sh --push <commit>...
 #                                       # same, starting from the given commits
 #                                       # instead of HEAD (used by pre-push)
+#   scripts/check-secrets.sh --range <base> <head>
+#                                       # scan commits reachable from <head>
+#                                       # but not from <base>, whether or not
+#                                       # they are on a remote (used by CI).
+#                                       # An all-zero <base> scans everything
+#                                       # reachable from <head>.
 #
 # Exit status:
 #   0  no blocking problem found (warnings may still be printed)
@@ -30,10 +36,12 @@ die() {
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/check-secrets.sh [--staged | --push [<commit>...]]
+Usage: scripts/check-secrets.sh [--staged | --push [<commit>...] | --range <base> <head>]
   --staged  ステージされた変更を検査する（既定）
   --push    まだリモートにないコミットの差分を検査する
             <commit> を渡すと HEAD の代わりにそのコミットから辿る
+  --range   <head> から辿れて <base> から辿れないコミットの差分を検査する
+            （リモートにあるかどうかは問わない。CI で使う。<base> がすべて 0 なら全履歴）
 環境変数 ESM_DENYLIST_FILE: 個人語（禁止語）を 1 行 1 語で書いたファイル（リポジトリ外）
 EOF
 }
@@ -49,6 +57,12 @@ case "${1:-}" in
     mode="push"
     shift
     push_tips=("$@")
+    ;;
+  --range)
+    mode="range"
+    (($# == 3)) || { usage; die "--range には <base> と <head> の 2 つを渡してください"; }
+    range_base="$2"
+    range_head="$3"
     ;;
   -h | --help) usage; exit 0 ;;
   *) usage; die "不明な引数: $1" ;;
@@ -221,20 +235,31 @@ if [[ "$mode" == "staged" ]]; then
   scope="ステージされた変更"
 else
   revs=()
-  if ((${#push_tips[@]} > 0)); then
-    for t in "${push_tips[@]}"; do
-      sha=$(git rev-parse --verify -q "$t^{commit}") || die "コミットとして解決できません: $t"
-      revs+=("$sha")
-    done
-    revs+=(--not --remotes)
-  elif git rev-parse --verify -q HEAD >/dev/null; then
-    revs=(HEAD --not --remotes)
+  if [[ "$mode" == "range" ]]; then
+    sha=$(git rev-parse --verify -q "$range_head^{commit}") || die "コミットとして解決できません: $range_head"
+    revs=("$sha")
+    zero_re='^0+$'
+    if [[ ! "$range_base" =~ $zero_re ]]; then
+      sha=$(git rev-parse --verify -q "$range_base^{commit}") || die "コミットとして解決できません: $range_base"
+      revs+=(--not "$sha")
+    fi
+    scope="指定範囲のコミット"
+  else
+    if ((${#push_tips[@]} > 0)); then
+      for t in "${push_tips[@]}"; do
+        sha=$(git rev-parse --verify -q "$t^{commit}") || die "コミットとして解決できません: $t"
+        revs+=("$sha")
+      done
+      revs+=(--not --remotes)
+    elif git rev-parse --verify -q HEAD >/dev/null; then
+      revs=(HEAD --not --remotes)
+    fi
+    scope="リモートにないコミット"
   fi
   diff_cmd=("${git_q[@]}" log --no-color --no-ext-diff -p -U0 -M --diff-merges=first-parent
     --diff-filter=ACMR --format='commit %H' "${revs[@]}")
   names_cmd=("${git_q[@]}" log --format= --name-only -M --diff-merges=first-parent
     --diff-filter=ACMR "${revs[@]}")
-  scope="リモートにないコミット"
 fi
 
 if [[ "$mode" == "push" && ${#revs[@]} -eq 0 ]]; then
