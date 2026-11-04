@@ -48,14 +48,16 @@
 
 | 仕組み | 場所 | いつ動くか |
 | --- | --- | --- |
-| 検査スクリプト | `scripts/check-secrets.sh` | 下の Git と Claude Code のフックから呼ばれる。手動でも実行できる |
+| 検査スクリプト | `scripts/check-secrets.sh` | 下の Git と Claude Code のフック、GitHub Actions から呼ばれる。手動でも実行できる |
 | Git の pre-commit フック | `.githooks/pre-commit` | `git commit` のたび（ステージされた変更を検査） |
 | Git の pre-push フック | `.githooks/pre-push` | `git push` のたび（プッシュするコミットのうち、まだリモートにないものを検査） |
 | Claude Code のフック | `.claude/settings.json` → `scripts/claude-hook-bash.sh` | Bash ツールのコマンドに `git commit` / `git push` を含むとき |
 | SessionStart フック | `.claude/settings.json` | セッション開始時に `git config core.hooksPath .githooks` を実行 |
+| GitHub Actions（CI） | `.github/workflows/check-secrets.yml` | PR の作成と更新のたび、main への push のたび（その PR・push のコミットを検査。GitHub の画面での編集も含む） |
 
-- 手動で実行する：`scripts/check-secrets.sh --staged`（ステージ済み）／`scripts/check-secrets.sh --push`（HEAD から辿れる未プッシュのコミット）／`scripts/check-secrets.sh --push <コミット>...`（指定したコミットから辿れる未プッシュのコミット）。
+- 手動で実行する：`scripts/check-secrets.sh --staged`（ステージ済み）／`scripts/check-secrets.sh --push`（HEAD から辿れる未プッシュのコミット）／`scripts/check-secrets.sh --push <コミット>...`（指定したコミットから辿れる未プッシュのコミット）／`scripts/check-secrets.sh --range <基点> <先端>`（先端から辿れて基点から辿れないコミット。リモートにあるかは問わない。CI が使う）。
 - 問題があると理由を標準エラーに出し、終了コード 2 で止まる。UUID 形式の文字列は警告のみで止めない。
 - 個人語の検査には、リポジトリ外に置いた禁止語ファイル（1 行 1 語、空行と `#` で始まる行は無視）を環境変数 `ESM_DENYLIST_FILE` で指定する。未設定・ファイルなし・中身が空のときは止めずに「個人語の検査は未実施」と表示する。ファイルがリポジトリ内にあるときは止める。
 - Claude Code の PreToolUse フックは、コマンドを実行する前に検査する。そのため `git add ... && git commit` のように 1 回のコマンドでステージとコミットをするときは、追加分は Git の pre-commit フックが検査する（二重の守り）。プッシュも同じで、Claude Code のフックは HEAD を検査し、Git の pre-push フックは実際にプッシュされるブランチのコミットを検査する。
+- 手元のフックは、GitHub の画面での編集（衝突の解消やファイルの編集）を検査できない。そのため GitHub Actions でも同じ検査を走らせる（三重の守り）。CI の個人語の検査は、リポジトリの Secrets に `ESM_DENYLIST`（1 行 1 語）を登録したときだけ行う。登録がないときや、フォークからの PR のときは「未実施」と表示する。
 - 検査を通すためにフックを外す（`--no-verify` など）ことはしない。誤検出のときは内容を直すか、検査スクリプトを直す。
