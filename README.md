@@ -9,6 +9,19 @@
 - 試作 C-A（公的発表の受信状況を見せる画面）：[docs/proto/c-a.md](docs/proto/c-a.md)
 - 試作 C-B（発表文の平易な言い換えと、原文との照合）：[docs/proto/c-b.md](docs/proto/c-b.md)。言い換えは原文を加工したもので、気象庁の発表ではありません。照合を通っても正しさは保証されません。
 
+## 開発に参加する人へ
+
+このリポジトリは、認証情報と個人情報が入らないように、コミットとプッシュのたびに検査します。クローンしたら、最初に次を実行して Git のフックを有効にしてください（Git の仕組み上、クローンしただけではフックは動きません）。
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- 必要なもの：bash 4.4 以上と git。macOS に最初から入っている bash は 3.2 なので、Homebrew などで新しい bash を入れてください。python3 があると、検査の一部（表記ゆれ、符号化した値）が強くなります。
+- 個人語（本名など）の検査には、リポジトリの外に置いた禁止語ファイルを環境変数 `ESM_DENYLIST_FILE` で指定します。書き方と仕組みの詳細は [CLAUDE.md](CLAUDE.md) の「開発基盤」にあります。
+- 検査のテスト：`bash tests/check-secrets.test.sh`
+- 公開前の最終確認（全履歴・すべてのブランチとタグ）：`scripts/check-secrets.sh --all --require-denylist`
+
 ## 外部データの出典
 
 | データ | 出典 | 扱い |

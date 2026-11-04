@@ -225,9 +225,21 @@ __marimo__/
 .claude/settings.local.json
 CLAUDE.local.md
 
-# Secrets and keys
+# Secrets and keys (scripts/check-secrets.sh also refuses these names)
 *.pem
 *.key
+*.p12
+*.pfx
+*.ppk
+*.keystore
+*.jks
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+.netrc
+.git-credentials
+.mcp.json
 secrets/
 
 # Local-only notes (personal info must never be committed)
