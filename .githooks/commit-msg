@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Git commit-msg hook: scan the commit message and the author/committer
+# identity for credentials and personal data, before the commit is made.
+# Enabled with: git config core.hooksPath .githooks
+# (the Claude Code SessionStart hook runs this automatically).
+root=$(git rev-parse --show-toplevel) || exit 2
+exec bash "$root/scripts/check-secrets.sh" --message "$1"

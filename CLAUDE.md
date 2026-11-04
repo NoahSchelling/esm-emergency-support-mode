@@ -50,14 +50,31 @@
 | --- | --- | --- |
 | 検査スクリプト | `scripts/check-secrets.sh` | 下の Git と Claude Code のフック、GitHub Actions から呼ばれる。手動でも実行できる |
 | Git の pre-commit フック | `.githooks/pre-commit` | `git commit` のたび（ステージされた変更を検査） |
-| Git の pre-push フック | `.githooks/pre-push` | `git push` のたび（プッシュするコミットのうち、まだリモートにないものを検査） |
-| Claude Code のフック | `.claude/settings.json` → `scripts/claude-hook-bash.sh` | Bash ツールのコマンドに `git commit` / `git push` を含むとき |
+| Git の commit-msg フック | `.githooks/commit-msg` | `git commit` のたび（コミットメッセージと、作成者・コミッターの名前とメールアドレスを検査） |
+| Git の pre-push フック | `.githooks/pre-push` | `git push` のたび（送り先にまだないコミットの差分・メッセージ・作成者、注釈付きタグ、ブランチ名とタグ名を検査） |
+| Claude Code のフック | `.claude/settings.json` → `scripts/claude-hook-bash.sh` | Bash ツールのコマンドに `commit` / `push` の語を含むとき検査する。Git のフックを外すコマンドは、いつでも止める |
 | SessionStart フック | `.claude/settings.json` | セッション開始時に `git config core.hooksPath .githooks` を実行 |
-| GitHub Actions（CI） | `.github/workflows/check-secrets.yml` | PR の作成と更新のたび、main への push のたび（その PR・push のコミットを検査。GitHub の画面での編集も含む） |
+| GitHub Actions（CI） | `.github/workflows/check-secrets.yml` | PR の作成と更新、すべてのブランチとタグへの push のたび（その PR・push のコミットを検査。GitHub の画面での編集も含む）。検査スクリプトのテストも走らせる。main への push では、禁止語リストを使って全履歴を検査する |
+| 自動テスト | `tests/check-secrets.test.sh` | 手動と CI。検査スクリプト、Git のフック、Claude Code のフックを、使い捨てのリポジトリで試す |
 
-- 手動で実行する：`scripts/check-secrets.sh --staged`（ステージ済み）／`scripts/check-secrets.sh --push`（HEAD から辿れる未プッシュのコミット）／`scripts/check-secrets.sh --push <コミット>...`（指定したコミットから辿れる未プッシュのコミット）／`scripts/check-secrets.sh --range <基点> <先端>`（先端から辿れて基点から辿れないコミット。リモートにあるかは問わない。CI が使う）。
-- 問題があると理由を標準エラーに出し、終了コード 2 で止まる。UUID 形式の文字列は警告のみで止めない。
-- 個人語の検査には、リポジトリ外に置いた禁止語ファイル（1 行 1 語、空行と `#` で始まる行は無視）を環境変数 `ESM_DENYLIST_FILE` で指定する。未設定・ファイルなし・中身が空のときは止めずに「個人語の検査は未実施」と表示する。ファイルがリポジトリ内にあるときは止める。
-- Claude Code の PreToolUse フックは、コマンドを実行する前に検査する。そのため `git add ... && git commit` のように 1 回のコマンドでステージとコミットをするときは、追加分は Git の pre-commit フックが検査する（二重の守り）。プッシュも同じで、Claude Code のフックは HEAD を検査し、Git の pre-push フックは実際にプッシュされるブランチのコミットを検査する。
-- 手元のフックは、GitHub の画面での編集（衝突の解消やファイルの編集）を検査できない。そのため GitHub Actions でも同じ検査を走らせる（三重の守り）。CI の個人語の検査は、リポジトリの Secrets に `ESM_DENYLIST`（1 行 1 語）を登録したときだけ行う。登録がないときや、フォークからの PR のときは「未実施」と表示する。
+- 手動で実行する：
+  - `scripts/check-secrets.sh --staged`：ステージ済みの変更。
+  - `scripts/check-secrets.sh --message <ファイル>`：コミットメッセージのファイルと、今の作成者・コミッター。
+  - `scripts/check-secrets.sh --push`：HEAD から辿れる未プッシュのコミット。`<コミット>...` を渡すとそこから辿る。pre-push は `--remote <名前>`（そのリモートの追跡参照だけを「プッシュ済み」とみなす）、`--base`、`--ref` も渡す。
+  - `scripts/check-secrets.sh --range <基点> <先端>`：先端から辿れて基点から辿れないコミット。リモートにあるかは問わない。CI が使う。
+  - `scripts/check-secrets.sh --all`：すべての参照から辿れる全履歴、すべての参照名と注釈付きタグ。**公開前の最終確認**では、禁止語ファイルを指定して `--all --require-denylist` で実行する。
+  - `--require-denylist`（どのモードでも）：個人語の検査ができないときは止める。
+  - `bash tests/check-secrets.test.sh`：自動テスト。偽の値はテストの実行時に断片をつないで作る。
+- 問題があると理由を標準エラーに出し、終了コード 2 で止まる。UUID 形式の文字列と、検査の仕組みに関わるファイル（フック、検査スクリプト、`.claude/settings.json`、ワークフロー、`.gitattributes`）の変更は、警告のみで止めない。ただし、フックの実行権限を外す変更と、フックや検査スクリプトを消す・名前を変える変更は止める。
+- 見つけた値は長さだけを出し、中身は出さない。一致があったファイル名と参照名（ブランチ名・タグ名）は伏せて番号で出す。
+- Git がバイナリとみなすファイル（UTF-16 で保存したテキストを含む）は、画像を除いて止める。画像は警告を出す（メタデータは検査しないので、消してから入れる）。
+- 必要なもの：bash 4.4 以上と git。python3 があると、個人語の表記ゆれ（全角・空白・ゼロ幅文字・かなの違い・Shift_JIS や EUC-JP）と、base64・16 進で符号化した値も検査する。python3 がないときは、そのことを表示する。
+- 個人語の検査には、リポジトリ外に置いた禁止語ファイル（1 行 1 語、空行と `#` で始まる行は無視）を環境変数 `ESM_DENYLIST_FILE` で指定する。未設定・ファイルなし・中身が空のときは止めずに「個人語の検査は未実施」と表示する。ファイルがリポジトリ内にあるとき、シンボリックリンクのときは止める。
+  - 漢字・ひらがな・カタカナ・ローマ字の表記を、それぞれ 1 行ずつ書く（読みの違いは機械では結び付けられない）。
+  - 2 文字以下などの短い語は、ほかの語の一部に一致しやすいので登録しない。
+- Claude Code の PreToolUse フックは、コマンドを実行する前に検査する。そのため `git add ... && git commit` のように 1 回のコマンドでステージとコミットをするときは、追加分は Git の pre-commit フックが検査する（二重の守り）。この二重の守りを保つため、Claude Code のフックは Git のフックを外すコマンド（`--no-verify`、`git commit -n`、`core.hooksPath` に触れるもの）を止め、Git のフックが有効で実行できる状態かも確かめる。
+- 手元のフックは、GitHub の画面での編集（衝突の解消やファイルの編集）を検査できない。そのため GitHub Actions でも同じ検査を走らせる（三重の守り）。CI は、ベースのブランチ（または main）にある版の検査スクリプトと、変更に含まれる版の両方で検査する（変更が自分の検査を止められないようにするため）。
+- CI の個人語の検査は、main への push のときだけ、Environment `personal-words` の Secrets に登録した `ESM_DENYLIST`（1 行 1 語）で行う。登録がないときは CI を失敗にする。PR では個人語の検査をしない（PR の中でワークフローを書き換えると、Secrets を読み出せてしまうため）。
+- GitHub の MCP の書き込み系の道具（`push_files`、`create_or_update_file`）は、手元のフックを通らないので `.claude/settings.json` で使えなくしている。
+- 公開の前後に人が行う作業（最終確認、公開した直後の Secret scanning と push protection の有効化）は `docs/release/publish-checklist.md` にまとめている。公開に関わる作業をするときは、先に読む。
 - 検査を通すためにフックを外す（`--no-verify` など）ことはしない。誤検出のときは内容を直すか、検査スクリプトを直す。

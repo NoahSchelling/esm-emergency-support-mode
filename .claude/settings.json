@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(git commit --no-verify:*)",
+      "Bash(git push --no-verify:*)",
+      "mcp__github__push_files",
+      "mcp__github__create_or_update_file"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
