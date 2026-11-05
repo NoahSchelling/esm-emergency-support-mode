@@ -1,0 +1,10 @@
+{
+  "name": "bw-app",
+  "private": true,
+  "type": "module",
+  "description": "Minimal smartphone web front end that shows the modules together (no dependencies)",
+  "scripts": {
+    "start": "node serve.js",
+    "test": "node --test 'test/*.test.js'"
+  }
+}

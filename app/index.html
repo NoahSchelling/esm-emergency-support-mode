@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>緊急支援モード（試作）</title>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<div id="sim-banner" class="banner" hidden>模擬データを含みます。気象庁の発表ではありません。</div>
+
+<main>
+<!-- 1. BW-S2 -->
+<section id="sec-official" class="official" aria-labelledby="h-official">
+  <h1 id="h-official">公的な発表を優先してください</h1>
+  <p>！！仮の値！！ この画面は、気象庁などの公的な発表を中継し、端末の状態を見せるだけの試作です。独自の予報・警報は出しません。避難や身の安全にかかわる判断は、気象庁・自治体などの公的な発表と指示を優先してください。表示は、古い・止まっている・間違っている可能性があります。</p>
+</section>
+
+<!-- 2. mode -->
+<section id="sec-mode" aria-labelledby="h-mode">
+  <h2 id="h-mode">いまのモード</h2>
+  <p class="status"><span id="mode-badge" class="badge st-none">—</span> <strong id="mode-label">—</strong></p>
+  <ul id="mode-lines" class="lines"></ul>
+  <p class="sub">切り替わった理由</p>
+  <p id="mode-reason" class="reason">—</p>
+  <p id="mode-last" class="note"></p>
+  <p class="note">試作 C-A から受け取った発表は、まだモードの入力につないでいません（電文の種類とモードの対応は未決：！！仮の値！！）。</p>
+  <details id="mode-controls">
+    <summary>申告と模擬の入力</summary>
+    <p class="sub">あなたの申告</p>
+    <div class="buttons" id="mode-requests"></div>
+    <p class="sub">模擬の公的発表（source: simulated。気象庁の発表ではありません）</p>
+    <div class="buttons" id="mode-sim"></div>
+  </details>
+</section>
+
+<!-- 3. area -->
+<section id="sec-area" aria-labelledby="h-area">
+  <h2 id="h-area">いる場所の市町村と区域</h2>
+  <p class="note">位置はこの画面の中だけで使い、端末の外に送りません。緯度・経度は画面に出しません。</p>
+  <button id="btn-locate" type="button">位置を取って区域を引く</button>
+  <p class="status"><span id="area-badge" class="badge st-none">—</span> <span id="area-status">まだ位置を取っていません。</span></p>
+  <ul id="area-lines" class="lines"></ul>
+  <p id="area-detail" class="detail"></p>
+  <p id="area-attribution" class="note"></p>
+</section>
+
+<!-- 4. announcements -->
+<section id="sec-ann" aria-labelledby="h-ann">
+  <h2 id="h-ann">最新の公的発表</h2>
+  <p class="status"><span id="ann-mock" class="badge st-mock" hidden>模擬データ</span> <span id="ann-badge" class="badge st-none">—</span> <span id="ann-origin"></span></p>
+  <div id="ann-latest" class="card"></div>
+  <p id="ann-detail" class="detail"></p>
+  <details>
+    <summary>最近の受信（新しい順）</summary>
+    <ol id="ann-recent" class="lines"></ol>
+  </details>
+  <div class="buttons"><button id="btn-ann-mock" type="button" hidden>模擬：電文を 1 件増やす</button></div>
+</section>
+
+<!-- 5. fragment -->
+<section id="sec-frag" aria-labelledby="h-frag">
+  <h2 id="h-frag">断片の入力</h2>
+  <form id="frag-form">
+    <label for="frag-input">短く打ってください（例：0846 M5.5 d50km 最大5弱）</label>
+    <div class="row">
+      <input id="frag-input" type="text" maxlength="200" autocomplete="off" inputmode="text">
+      <button id="btn-frag" type="submit">読み取る</button>
+    </div>
+  </form>
+  <p class="sub">あなたの申告（未確認）</p>
+  <p class="status"><span id="frag-badge" class="badge st-none">—</span> <span id="frag-status">まだ入力がありません。</span></p>
+  <ul id="frag-lines" class="lines"></ul>
+  <p id="frag-detail" class="detail"></p>
+  <p class="note">読み取りは機械的なもので、間違うことがあります。公的に確認された情報ではありません。入力は端末の外に送りません。</p>
+</section>
+
+<!-- 6. sensors -->
+<section id="sec-sensors" aria-labelledby="h-sensors">
+  <h2 id="h-sensors">センサーの状態</h2>
+  <div class="buttons"><button id="btn-perm" type="button">揺れと向きの許可を求める</button></div>
+  <table id="sensor-table">
+    <thead><tr><th scope="col">項目</th><th scope="col">状態</th></tr></thead>
+    <tbody id="sensor-rows"></tbody>
+  </table>
+  <p class="note">「取れた」は値が取れたという意味だけです。値が取れないこと、更新が止まっていることは、異常がない・安全という意味ではありません。通信が「オンライン」でも、公的な情報源に届くとは限りません。</p>
+</section>
+
+<!-- 7. motion -->
+<section id="sec-motion" aria-labelledby="h-motion">
+  <h2 id="h-motion">この端末が記録した揺れ（震度ではありません）</h2>
+  <p class="status"><span id="motion-badge" class="badge st-none">—</span> <span id="motion-status">—</span></p>
+  <ul id="motion-lines" class="lines"></ul>
+  <p id="motion-detail" class="detail"></p>
+  <p class="note">端末が記録した生の値です。地震の発生や強さは判断しません。</p>
+</section>
+
+<section id="sec-policy" aria-labelledby="h-policy">
+  <h2 id="h-policy">助言について</h2>
+  <p id="policy-text">このアプリは、メンタルヘルスの助言も医療の助言も行いません。</p>
+</section>
+
+<section id="sec-modules" aria-labelledby="h-modules">
+  <h2 id="h-modules">読み込んだモジュール</h2>
+  <ul id="module-list" class="lines"></ul>
+</section>
+</main>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>
