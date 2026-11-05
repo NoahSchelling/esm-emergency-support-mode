@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>センサーの試験用ページ</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 16px; line-height: 1.5; background: #fff; color: #111; }
+  .notice { border: 2px solid #333; padding: 8px 12px; margin-bottom: 12px; }
+  button { font-size: 16px; padding: 8px 12px; margin: 4px 4px 4px 0; }
+  section { border-top: 1px solid #999; margin-top: 12px; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: #f2f2f2; padding: 8px; }
+  #mode { font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="notice">
+  <p><strong>公的な発表を優先してください。</strong>！！仮の値！！ このページはセンサーの試験用です。地震・気象の情報や警報は出しません。避難や身の安全の判断は、気象庁・自治体などの公的な発表と指示に従ってください。</p>
+  <p>このページは、取得した値を端末の外に送りません。</p>
+</div>
+
+<p>動かし方：<span id="mode">未開始</span></p>
+<button id="start-device" type="button">端末のセンサーで始める</button>
+<button id="start-replay" type="button">記録したデータを再生する（模擬）</button>
+<br>
+<button id="perm" type="button">揺れと向きの許可を求める</button>
+<button id="locate" type="button">位置を 1 回取る</button>
+<button id="peak-start" type="button">揺れの最大値の記録を始める</button>
+<button id="peak-stop" type="button">記録を止める</button>
+<br>
+<button id="rec-start" type="button">生の値の記録を始める（位置は含めない）</button>
+<button id="rec-stop" type="button">記録を止めて保存する</button>
+<a id="rec-download" hidden download="sensor-recording.json">保存した記録</a>
+
+<section><h2>この端末が記録した揺れ（震度ではありません）</h2><pre id="out-motion"></pre><h3>最大値（直近 10 秒）</h3><pre id="out-peak"></pre><h3>最大値（記録）</h3><pre id="out-peak-rec"></pre></section>
+<section><h2>位置</h2><pre id="out-location"></pre></section>
+<section><h2>向き</h2><pre id="out-orientation"></pre></section>
+<section><h2>通信の有無</h2><pre id="out-online"></pre></section>
+<section><h2>通信の種類</h2><pre id="out-network"></pre></section>
+<section><h2>電池</h2><pre id="out-battery"></pre></section>
+<section><h2>許可の結果</h2><pre id="out-perm"></pre></section>
+
+<script type="module" src="./demo.js"></script>
+</body>
+</html>

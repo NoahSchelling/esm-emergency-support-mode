@@ -38,7 +38,14 @@ export function requestEventPermission({ env, kind, EventClass, what }) {
         return done(
           STATUS.DENIED,
           null,
-          `${what}の利用が許可されませんでした。iPhone では、いったんページを閉じて開き直すと、もう一度求められます。`,
+          `${what}の利用が許可されませんでした。もう一度求めるには、ブラウザを開き直すか、端末やブラウザの設定を変える必要がある場合があります。`,
+        );
+      }
+      if (answer === 'prompt') {
+        return done(
+          STATUS.UNKNOWN,
+          null,
+          `${what}はまだ許可されていません（許可を求める画面が出ませんでした）。ボタンを押してもう一度求めてください。`,
         );
       }
       return done(STATUS.UNKNOWN, null, `${what}の許可の結果が分かりませんでした（${String(answer)}）。`);

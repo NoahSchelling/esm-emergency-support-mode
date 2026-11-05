@@ -194,3 +194,11 @@ test('insecure / unsupported / empty event', async () => {
   empty.advanceTo(0);
   assert.equal(assertContract(se.read(), 'motion').status, 'unsupported');
 });
+
+test('"prompt" answer -> "unknown" (neither granted nor denied)', async () => {
+  const p = createReplayPlayer(recording({ ...base, motion_permission: 'prompt' }));
+  p.env.DeviceMotionEvent.requestPermission = () => Promise.resolve('prompt');
+  const r = assertContract(await createMotionSensor({ env: p.env }).requestPermission(), 'motion_permission');
+  assert.equal(r.status, 'unknown');
+  assert.match(r.detail, /まだ許可されていません/);
+});
