@@ -31,7 +31,15 @@ const ISO_TZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2
 
 /** True when value is an ISO 8601 date-time string with a time zone. */
 export function isIsoWithZone(value) {
-  return typeof value === "string" && ISO_TZ.test(value) && !Number.isNaN(Date.parse(value));
+  if (typeof value !== "string" || !ISO_TZ.test(value) || Number.isNaN(Date.parse(value))) return false;
+  // Reject dates that Date.parse silently rolls over (e.g. February 30).
+  const [y, mo, d] = value.slice(0, 10).split("-").map(Number);
+  const hh = Number(value.slice(11, 13));
+  const mm = Number(value.slice(14, 16));
+  const cal = new Date(Date.UTC(y, mo - 1, d));
+  return (
+    cal.getUTCFullYear() === y && cal.getUTCMonth() === mo - 1 && cal.getUTCDate() === d && hh < 24 && mm < 60
+  );
 }
 
 /**
@@ -60,6 +68,22 @@ function validateState(s, config) {
   if (!Object.hasOwn(MODE_RANK, s.mode)) return "前の状態のモードが不正です。";
   if (!Array.isArray(s.active)) return "前の状態の発表の一覧が不正です。";
   if (!isIsoWithZone(s.updated_at)) return "前の状態の時刻が不正です。";
+  for (const a of s.active) {
+    if (
+      a === null ||
+      typeof a !== "object" ||
+      typeof a.id !== "string" ||
+      a.id.length === 0 ||
+      typeof a.label !== "string" ||
+      !["strong", "weak", "none"].includes(a.strength) ||
+      typeof a.floor !== "boolean" ||
+      (a.floor_until !== null && !isIsoWithZone(a.floor_until)) ||
+      !isIsoWithZone(a.received_at)
+    ) {
+      return "前の状態の発表の一覧に、不正な項目があります。";
+    }
+  }
+  if (![null, "public", "user"].includes(s.emergency_by)) return "前の状態の緊急の原因が不正です。";
   if (s.mode === MODES.EMERGENCY) {
     if (!Number.isInteger(s.stage) || s.stage < 1 || s.stage > config.stages.length) {
       return "前の状態の段階が、設定の段階の数と合いません。";
@@ -124,14 +148,31 @@ function causeOf(event, source) {
 }
 
 function record(at, rule, from, to, cause, outcome, detail) {
-  return Object.freeze({ at, rule, from, to, changed: from.mode !== to.mode || from.stage !== to.stage, outcome, cause, detail });
+  return Object.freeze({
+    at,
+    rule,
+    from: Object.freeze({ ...from }),
+    to: Object.freeze({ ...to }),
+    changed: from.mode !== to.mode || from.stage !== to.stage,
+    outcome,
+    cause: Object.freeze({ ...cause }),
+    detail,
+  });
+}
+
+function deepFreeze(o) {
+  if (o !== null && typeof o === "object" && !Object.isFrozen(o)) {
+    for (const v of Object.values(o)) deepFreeze(v);
+    Object.freeze(o);
+  }
+  return o;
 }
 
 function result(status, value, at, source, detail) {
   return Object.freeze({
     kind: KIND,
     status,
-    value: status === "ok" ? value : null,
+    value: status === "ok" ? deepFreeze(value) : null,
     observed_at: at,
     source,
     detail,
@@ -163,7 +204,9 @@ function onPublic(prev, event, config, source) {
     const rec = record(at, "-", snap(prev), snap(prev), cause, "unknown", cls.reason);
     return { state: prev, status: "unknown", detail: `${cls.reason}モードは変えていません（判定できないことは「異常なし」ではありません）。`, records: [rec] };
   }
-  if (prev.active.some((a) => a.id === event.id)) {
+  const same = prev.active.find((a) => a.id === event.id);
+  const isUpdate = same !== undefined && (same.category !== event.category || same.intensity !== event.intensity);
+  if (same && !isUpdate) {
     const text = `${cls.label}（${event.id}）はすでに受けています。モードは${describe(prev, config)}のままです。`;
     const rec = record(at, "-", snap(prev), snap(prev), cause, "duplicate", text);
     return { state: { ...prev, updated_at: laterOf(prev.updated_at, at) }, status: "ok", detail: withNote(prev, text), records: [rec], changed: false };
@@ -182,7 +225,11 @@ function onPublic(prev, event, config, source) {
     source,
   };
   if (event.intensity !== undefined) entry.intensity = event.intensity;
-  let next = { ...prev, active: [...prev.active, entry], updated_at: laterOf(prev.updated_at, at) };
+  // A follow-up report with the same id but different content replaces the
+  // old entry and is evaluated again, so an upgrade (e.g. warning -> major
+  // tsunami warning) is never dropped as a duplicate.
+  const kept = prev.active.filter((a) => a.id !== event.id);
+  let next = { ...prev, active: [...kept, entry], updated_at: laterOf(prev.updated_at, at) };
   let rule;
   let text;
   if (cls.strength === "strong") {
@@ -205,10 +252,13 @@ function onPublic(prev, event, config, source) {
     rule = "-";
     text = `${cls.label}を受けました。規則の対象（震度3以上）ではないため、モードは${describe(prev, config)}のままです。`;
   }
+  if (isUpdate) {
+    text = `同じ id（${event.id}）の続報で内容が変わりました（前：${same.label}）。${text}`;
+  }
   if (cls.floor) {
     text += ` この発表を受けている間は、利用者の申告があっても警戒高めより下げません（下限）。`;
   }
-  const rec = record(at, rule, snap(prev), snap(next), cause, "applied", text);
+  const rec = record(at, rule, snap(prev), snap(next), cause, isUpdate ? "updated" : "applied", text);
   return { state: next, status: "ok", detail: withNote(next, text), records: [rec] };
 }
 
@@ -227,6 +277,11 @@ function onPublicEnd(prev, event, config, source) {
     const text = `${word}の対象（${event.target_id}）を受けた記録がありません。モードは${describe(prev, config)}のままです。`;
     const rec = record(at, "R5", snap(prev), snap(prev), cause, "unknown", text);
     return { state: prev, status: "unknown", detail: `${text} ${END_NOT_SAFE_NOTE}`, records: [rec] };
+  }
+  if (Date.parse(at) < Date.parse(target.received_at)) {
+    const text = `${word}（${at}）は、対象の${target.label}を受けた時刻（${target.received_at}）より前の時刻です。古い入力として扱い、従っていません。モードは${describe(prev, config)}のままです。`;
+    const rec = record(at, "R5", snap(prev), snap(prev), cause, "stale", text);
+    return { state: prev, status: "stale", detail: text, records: [rec] };
   }
   let next = {
     ...prev,
@@ -306,33 +361,28 @@ function onUser(prev, event, config, source) {
   return { state: next, status: "ok", detail: withNote(next, text), records: [rec] };
 }
 
-function onTick(prev, event, config, source) {
-  const at = event.at;
-  const cause = causeOf(event, source);
+// Apply what the passage of time implies, at the time of any event:
+// expiry of configured intensity floors (rule 3) and stage progression
+// (rule 6). The event that carries the time is recorded as the cause.
+function catchUp(prev, at, cause, config) {
   const records = [];
   const notes = [];
-  let next = { ...prev };
   const nowMs = Date.parse(at);
-  if (nowMs < Date.parse(prev.updated_at)) {
-    const text = `時刻 ${at} は、前の状態の時刻より前です。段階は進めていません。`;
-    return { state: prev, status: "ok", detail: withNote(prev, text), records: [], changed: false };
+  let next = prev;
+  if (prev.active.some((a) => a.floor && a.floor_until !== null && Date.parse(a.floor_until) <= nowMs)) {
+    next = {
+      ...next,
+      active: next.active.map((a) => {
+        if (a.floor && a.floor_until !== null && Date.parse(a.floor_until) <= nowMs) {
+          const text = `${a.label}（${a.id}）による下限の期間（設定値）が過ぎました。モードは変えていません。`;
+          records.push(record(at, "R3", snap(prev), snap(prev), cause, "floor_expired", text));
+          notes.push(text);
+          return { ...a, floor: false, floor_until: null };
+        }
+        return a;
+      }),
+    };
   }
-  next.updated_at = at;
-
-  // Floor expiry for intensity observations (only when configured).
-  if (next.active.some((a) => a.floor && a.floor_until !== null && Date.parse(a.floor_until) <= nowMs)) {
-    next.active = next.active.map((a) => {
-      if (a.floor && a.floor_until !== null && Date.parse(a.floor_until) <= nowMs) {
-        const text = `${a.label}（${a.id}）による下限の期間（設定値）が過ぎました。モードは変えていません。`;
-        records.push(record(at, "R3", snap(prev), snap(prev), cause, "floor_expired", text));
-        notes.push(text);
-        return { ...a, floor: false, floor_until: null };
-      }
-      return a;
-    });
-  }
-
-  // Stage progression (rule 6), measured from the start of the emergency.
   if (next.mode === MODES.EMERGENCY) {
     const elapsedH = (nowMs - Date.parse(next.emergency_started_at)) / HOUR_MS;
     let target = 1;
@@ -350,9 +400,17 @@ function onTick(prev, event, config, source) {
       notes.push(text);
     }
   }
-  const changed = next.stage !== prev.stage || next.mode !== prev.mode;
-  const text = notes.length > 0 ? notes.join(" ") : `時間の経過を受けました。モードは${describe(next, config)}のままです。`;
-  return { state: next, status: "ok", detail: withNote(next, text), records, changed };
+  return { state: next, records, notes };
+}
+
+function onTick(prev, event, config) {
+  const text = `時間の経過を受けました。モードは${describe(prev, config)}です。`;
+  return {
+    state: { ...prev, updated_at: laterOf(prev.updated_at, event.at) },
+    status: "ok",
+    detail: withNote(prev, text),
+    records: [],
+  };
 }
 
 const HANDLERS = Object.freeze({
@@ -377,12 +435,17 @@ const DEFAULT_SOURCES = Object.freeze({ user: "user", tick: "clock" });
  * @returns {{state: object, result: object, records: object[]}}
  */
 export function step(prev, event, options = {}) {
-  const config = options.config ?? getDefaultConfig();
   const now = options.now ?? (() => new Date());
   const fail = (detail, source = "unknown") => {
-    const at = event && isIsoWithZone(event.at) ? event.at : now().toISOString();
+    const at = event && isIsoWithZone(event?.at) ? event.at : now().toISOString();
     return { state: prev, result: result("error", null, at, source, detail), records: [] };
   };
+  let config;
+  try {
+    config = options.config === undefined ? getDefaultConfig() : createConfig(options.config);
+  } catch (e) {
+    return fail(`設定が正しくありません（${e.message}）。状態を更新していません。`);
+  }
   const stateError = validateState(prev, config);
   if (stateError) return fail(`${stateError} 状態を更新していません。`);
   if (event === null || typeof event !== "object") return fail("イベントがありません。");
@@ -392,18 +455,31 @@ export function step(prev, event, options = {}) {
   if (typeof source !== "string" || source.length === 0) {
     return fail("公的発表のイベントには source（例 \"jma\"、\"simulated\"）が必要です。");
   }
+  if ((event.type === "public" || event.type === "public_end") && source === "user") {
+    return fail("公的発表のイベントの source に \"user\" は使えません。", source);
+  }
+  if (event.type === "user" && source !== "user" && source !== "simulated") {
+    return fail("利用者の申告の source は \"user\" か \"simulated\" にしてください。", source);
+  }
   if (!isIsoWithZone(event.at)) {
     return fail("イベントの時刻 at が、タイムゾーン付きの ISO 8601 ではありません。", source);
   }
-  const out = handler(prev, event, config, source);
+  const cause = causeOf(event, source);
+  if (event.type === "tick" && Date.parse(event.at) < Date.parse(prev.updated_at)) {
+    const text = `時刻 ${event.at} は、前の状態の時刻（${prev.updated_at}）より前です。古い入力として扱い、何も変えていません。`;
+    return { state: prev, result: result("stale", null, event.at, source, text), records: [] };
+  }
+  const caught = catchUp(prev, event.at, cause, config);
+  const out = handler(caught.state, event, config, source);
   if (out.error) return fail(out.error, source);
   const state = out.state === prev ? prev : freezeState(out.state);
   const changed = out.changed ?? (state.mode !== prev.mode || state.stage !== prev.stage);
   const value = out.status === "ok" ? view(state, config, changed) : null;
+  const detail = [...caught.notes, out.detail].join(" ");
   return {
     state,
-    result: result(out.status, value, event.at, source, out.detail),
-    records: out.records,
+    result: result(out.status, value, event.at, source, detail),
+    records: [...caught.records, ...out.records],
   };
 }
 

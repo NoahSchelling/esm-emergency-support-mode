@@ -157,7 +157,7 @@ describe("R5: lift/cancel never returns to normal automatically", () => {
   test("lift in emergency goes to elevated", () => {
     const { state, records, results } = run(S0, [pub("t1", "tsunami_warning", at(1)), end("t1", "lift", at(60))]);
     assert.equal(state.mode, "elevated");
-    assert.equal(records[1].rule, "R5");
+    assert.deepEqual(records.map((r) => r.rule), ["R1", "R6", "R5"], "stage catch-up is recorded before the lift");
     assert.match(results[1].detail, /安全」という意味ではありません/);
   });
   test("lift in elevated stays elevated", () => {
@@ -313,5 +313,69 @@ describe("pure function and error handling", () => {
       const stripped = t.replace(/安全という意味ではありません|「安全」という意味ではありません|安全確保後/g, "");
       assert.doesNotMatch(stripped, /安全|安心|大丈夫/, t);
     }
+  });
+});
+
+describe("fixes from the independent review", () => {
+  test("an expired intensity floor does not block a request without a tick", () => {
+    const config = createConfig({ intensityFloorHours: 1 });
+    const { state, results, records } = run(
+      S0,
+      [pub("q1", "intensity", at(0), { intensity: "6-" }), user("set_normal", hours(5))],
+      { config },
+    );
+    assert.equal(results[1].status, "ok");
+    assert.equal(state.mode, "normal");
+    assert.equal(records[1].outcome, "floor_expired");
+    assert.equal(records[1].cause.request, "set_normal");
+  });
+  test("stages catch up on any event, not only on ticks", () => {
+    const { results, records } = run(S0, [pub("e1", "eew_warning", at(0)), pub("w1", "warning", hours(100))]);
+    assert.equal(results[1].value.stage, 4);
+    assert.equal(records.filter((r) => r.rule === "R6").length, 3);
+    assert.ok(records.filter((r) => r.rule === "R6").every((r) => r.cause.id === "w1"));
+  });
+  test("a broken entry in the previous state is an error, not an exception", () => {
+    const s = { ...S0, active: [null] };
+    const out = step(s, tick(at(1)));
+    assert.equal(out.result.status, "error");
+  });
+  test("a config that did not come from createConfig is validated", () => {
+    const out = step(S0, tick(at(1)), { config: { stages: [], stageHours: [] } });
+    assert.equal(out.result.status, "error");
+  });
+  test("a tick older than the state is stale", () => {
+    const s1 = step(S0, pub("e1", "eew_warning", at(10))).state;
+    const out = step(s1, tick(at(0)));
+    assert.equal(out.result.status, "stale");
+    assert.equal(out.result.value, null);
+    assert.equal(out.state, s1);
+  });
+  test("a lift older than the announcement is stale and not applied", () => {
+    const s1 = step(S0, pub("t1", "tsunami_warning", at(10))).state;
+    const out = step(s1, end("t1", "lift", at(5)));
+    assert.equal(out.result.status, "stale");
+    assert.equal(out.state.mode, "emergency");
+    assert.equal(out.state.active.length, 1);
+  });
+  test("same id with an upgraded category is applied, not dropped", () => {
+    const { state, results, records } = run(S0, [
+      pub("x", "warning", at(0)),
+      pub("x", "major_tsunami_warning", at(1)),
+      user("set_normal", at(2)),
+    ]);
+    assert.equal(results[1].value.mode, "emergency");
+    assert.equal(records[1].outcome, "updated");
+    assert.equal(results[2].status, "denied");
+    assert.equal(state.active.length, 1);
+  });
+  test("public announcements cannot claim source user, requests cannot claim a public source", () => {
+    assert.equal(step(S0, { ...pub("e1", "eew_warning", at(0)), source: "user" }).result.status, "error");
+    assert.equal(step(S0, { ...user("set_emergency", at(0)), source: "jma" }).result.status, "error");
+    assert.equal(step(S0, { ...user("set_emergency", at(0)), source: "simulated" }).result.status, "ok");
+  });
+  test("impossible calendar dates are rejected", () => {
+    const out = step(S0, pub("e1", "eew_warning", "2026-02-30T10:00:00+09:00"), { now: () => new Date(T0) });
+    assert.equal(out.result.status, "error");
   });
 });

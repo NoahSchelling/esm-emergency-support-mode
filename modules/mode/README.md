@@ -51,10 +51,12 @@ console.log(out.records);   // どの入力で何が変わったかの記録
 | `public` | `id`、`category`、`at`、`source`、（震度のとき）`intensity` | 公的発表を受けた |
 | `public_end` | `target_id`、`reason`（`"lift"` 解除／`"cancel"` 取消）、`at`、`source` | 公的発表の解除・取消 |
 | `user` | `request`、`at`、（省略時 `"user"`）`source` | 利用者の申告 |
-| `tick` | `at`、（省略時 `"clock"`）`source` | 時間の経過。段階はこのイベントでだけ進む |
+| `tick` | `at`、（省略時 `"clock"`）`source` | 時間の経過 |
 
-- `public` と `public_end` は `source` が必須です（例 `"jma"`）。模擬データ・再生データは `"simulated"` にします。
-- 同じ発表の続報（緊急地震速報の第 2 報など）は、同じ `id` で渡してください。すでに受けている `id` は「受け済み」として扱い、モードを変えません。
+- `public` と `public_end` は `source` が必須です（例 `"jma"`）。`"user"` は使えません。`user` の `source` は `"user"` か `"simulated"` だけです。模擬データ・再生データは `"simulated"` にします。
+- 同じ発表の続報（緊急地震速報の第 2 報など）は、同じ `id` で渡してください。種類と震度が同じなら「受け済み」として扱い、モードを変えません。種類か震度が変わっていれば（警報から大津波警報へ、など）、前の内容と置き換えて、新しく受けた発表として規則に当てはめます。
+- 時間の経過による変化（段階が進む、設定した下限の期間が過ぎる）は、どの種類のイベントを受けたときにも、そのイベントの時刻で先に当てはめます。記録の原因には、そのイベントを書きます。画面の段階を新しく保つには、定期的に `tick` を送ってください。
+- 前の状態の時刻より前の `tick`、対象の発表を受けた時刻より前の解除・取消は `stale` を返し、従いません。公的発表と申告は、時刻が前後していても受けます（公的発表を捨てないため）。
 
 `category` と規則の対応（`categories.js`）：
 
@@ -85,7 +87,7 @@ console.log(out.records);   // どの入力で何が変わったかの記録
 ```js
 {
   kind: "mode",
-  status: "ok" | "denied" | "unknown" | "error",
+  status: "ok" | "denied" | "unknown" | "stale" | "error",
   value: {               // status が "ok" のときだけ。それ以外は null
     mode: "normal" | "elevated" | "emergency",
     mode_label: "平常" | "警戒高め" | "緊急",
@@ -106,11 +108,12 @@ console.log(out.records);   // どの入力で何が変わったかの記録
 
 - `denied`：下げる申告が下限に当たった。理由（どの発表による下限か）を `detail` に書く。状態は変えない。
 - `unknown`：発表の種類や震度が表にない、解除の対象を受けた記録がない、申告が一覧にない。状態は変えない。
-- `error`：イベントや前の状態の形が正しくない。状態は変えない。
+- `stale`：時刻が古い入力（上の「イベント」を参照）。状態は変えない。
+- `error`：イベント、前の状態、設定の形が正しくない。状態は変えない。
 
 ### 記録（規則 7）
 
-`records` は、その入力で起きたことを 1 件ずつ並べた配列です。モードや段階が変わったとき、申告を断ったとき、判定できなかったときに記録を返します（段階が変わらない `tick` は記録を返しません）。
+`records` は、その入力で起きたことを 1 件ずつ並べた配列です。モードや段階が変わったとき、下限の期間が過ぎたとき、申告を断ったとき、判定できなかったとき、古い解除・取消を断ったときに記録を返します（何も変わらない `tick` は記録を返しません）。
 
 ```js
 {
@@ -119,7 +122,7 @@ console.log(out.records);   // どの入力で何が変わったかの記録
   from: { mode, stage },
   to:   { mode, stage },
   changed: true | false,
-  outcome: "applied" | "denied" | "duplicate" | "unknown" | "floor_expired",
+  outcome: "applied" | "updated" | "denied" | "duplicate" | "unknown" | "stale" | "floor_expired",
   cause: { type, source, at, id?, category?, intensity?, target_id?, reason?, request? },
   detail: "人が読む日本語"
 }
@@ -146,7 +149,7 @@ step(state, event, { config });
 | `intensityFloorHours` | `null`（！！仮の値！！） | 震度の観測には「解除」がないため、下限をいつまで保つか |
 | `onEndInEmergency` | `"to_elevated"`（！！仮の値！！） | 解除・取消で緊急から警戒高めに下げるか |
 
-設定の値が正しくないと、`createConfig` が例外を投げます。前の状態の段階が設定の段階の数を超えるときは、`step` が `error` を返します。
+設定の値が正しくないと、`createConfig` が例外を投げます。`step` に渡した設定も中で検査し、正しくなければ `error` を返します。前の状態の段階が設定の段階の数を超えるときも `error` です。
 
 既定値が仮の値になっている理由と、規則どうしが衝突する場面は [docs/proto/mode.md](../../docs/proto/mode.md) に書いています。
 
@@ -158,7 +161,7 @@ step(state, event, { config });
 node --test 'modules/mode/test/*.test.js'
 ```
 
-- `test/rules.test.js`：規則 1〜7 のそれぞれと、純粋な関数であること・誤った入力の扱い。
+- `test/rules.test.js`：規則 1〜7 のそれぞれと、純粋な関数であること・誤った入力の扱い。独立した突き合わせで見つかった食い違いの再発防止のテストも含む。
 - `test/scenarios.test.js`：強い発表 → 解除 → 利用者が平常に戻す／津波警報の間に「平常に戻して」（下限で止まる）／弱い発表が続く（緊急に上がらない）／取消（誤報）。
 
 テストのイベントはすべて架空のもので、`source` は `"simulated"` です。
