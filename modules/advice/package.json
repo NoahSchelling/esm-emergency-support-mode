@@ -1,0 +1,7 @@
+{
+  "name": "advice",
+  "private": true,
+  "type": "module",
+  "description": "Interface only: a gate for future mental-health / medical advice providers. Ships with no provider (BW-S4).",
+  "exports": "./index.js"
+}
