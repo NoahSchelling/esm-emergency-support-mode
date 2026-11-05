@@ -38,6 +38,7 @@ function setLines(id, lines) {
 function noValueDetail(r) {
   if (!r) return '';
   if (r.status === 'ok') return r.detail ?? '';
+  if (/(異常がない|安全).*意味ではありません/.test(r.detail ?? '')) return r.detail;
   return `${r.detail ?? ''} ${NO_VALUE_NOTE}`.trim();
 }
 
