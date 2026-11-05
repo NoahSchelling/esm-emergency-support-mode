@@ -8,6 +8,11 @@
 
 - 試作 C-A（公的発表の受信状況を見せる画面）：[docs/proto/c-a.md](docs/proto/c-a.md)
 - 試作 C-B（発表文の平易な言い換えと、原文との照合）：[docs/proto/c-b.md](docs/proto/c-b.md)。言い換えは原文を加工したもので、気象庁の発表ではありません。照合を通っても正しさは保証されません。
+- センサーのモジュール（位置・揺れ・向き・通信の有無・通信の種類・電池）：[modules/sensors/README.md](modules/sensors/README.md)。揺れの値は端末が記録した生の値で、震度ではありません。地震の発生や強さは判断しません。
+
+## モジュール
+
+- 区域の判定（緯度・経度から、市町村と気象庁の警報・注意報の区域のコードを端末の中で引く。静岡県のみ）：[modules/area/README.md](modules/area/README.md)。区域を引くだけで、警報の有無は判定しません。「判定できない」は「安全」ではありません。
 
 ## 部品
 
@@ -36,7 +41,8 @@ git config core.hooksPath .githooks
 | キキクルの時刻の一覧（1 件。加工なし） | 出典：気象庁ホームページ（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。 |
 | 暑さ指数（WBGT）の地点別予測値（1 件。加工なし） | 出典：環境省熱中症予防情報サイト（環境省）（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。提供期間が終わったあとの古いデータ。 |
 | 重ねるハザードマップの WMTS メタデータ（1 件。加工なし） | 出典：「ハザードマップポータルサイト」（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。 |
+| 予報区等 GIS データ（静岡県分。市町村等（気象警報等）・市町村等（地震津波関係）・府県予報区等）と、防災情報 XML の個別コード表 | 出典：気象庁ホームページ（<https://www.data.jma.go.jp/developer/gis.html>）。気象庁「予報区等GISデータ」を加工して作成（加工と編集の責任は本プロジェクト）。GIS データは国土地理院長の承認を得て作成されたもの（承認番号は `modules/area/data/SOURCE.md`） | `modules/area/data/shizuoka.json` に、切り出し・簡略化・座標の丸めをして保存している。手順と簡略化による誤判定の恐れは `modules/area/data/SOURCE.md`。 |
 
 気象庁のデータの利用条件は `docs/research/jma_data.md` の 4 章に、気象庁防災情報 XML 以外の公的な防災データの取得方法と利用条件は `docs/research/other_data.md` にまとめています。
 
-試作 C-A の模擬データは、プログラムが作る架空のデータで、外部から持ち込んだものではありません。
+試作 C-A の模擬データは、プログラムが作る架空のデータで、外部から持ち込んだものではありません。センサーのモジュールの再生用データ（`modules/sensors/fixtures/`）も、スクリプトで作った架空のデータです。
