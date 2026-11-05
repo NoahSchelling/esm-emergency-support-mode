@@ -1,0 +1,7 @@
+{
+  "name": "fragment",
+  "private": true,
+  "type": "module",
+  "description": "Parser for short, fragmentary quake reports typed by a user (no external dependencies).",
+  "exports": "./index.js"
+}
