@@ -1,0 +1,10 @@
+{
+  "name": "esm-mode",
+  "private": true,
+  "type": "module",
+  "description": "State machine for the emergency support mode (public announcements and user requests only)",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}
