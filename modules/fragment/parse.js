@@ -158,7 +158,10 @@ function readAtoms(n, ctx) {
   const addDate = (m, s, e, y, mo, d, hasYear) => {
     if (prevIs(w, s, /[\d./]/)) return;
     const year = hasYear ? y : jstParts(ctx.now).y;
-    if (!isRealDate(year, mo, d)) return reject(m[0], '日付として読めない');
+    if (!isRealDate(year, mo, d)) {
+      ctx.dateRejected = true; // a date was written but unreadable: do not fill in "today" for it
+      return reject(m[0], '日付として読めない');
+    }
     dates.push({ y: year, m: mo, d, hasYear, word: null, raw: m[0] });
     mask(s, e);
   };
@@ -256,7 +259,7 @@ function buildTimes(dates, times, ctx) {
       if (d && d.word === 'today') { ymd = { y: today.y, m: today.m, d: today.d }; basis = 'relative-word'; }
       else if (d && d.word === 'yesterday') { ymd = shiftDays(today.y, today.m, today.d, -1); basis = 'relative-word'; }
       else if (d) { ymd = { y: d.y, m: d.m, d: d.d }; basis = d.hasYear ? 'input' : 'input-year-assumed'; }
-      else if (ctx.assumeToday) { ymd = { y: today.y, m: today.m, d: today.d }; basis = 'assumed-today'; }
+      else if (ctx.assumeToday && !ctx.dateRejected) { ymd = { y: today.y, m: today.m, d: today.d }; basis = 'assumed-today'; }
       const dateText = ymd ? `${pad(ymd.y, 4)}-${pad(ymd.m)}-${pad(ymd.d)}` : null;
       let iso = null;
       if (ymd && t) {
@@ -284,7 +287,7 @@ function buildTimes(dates, times, ctx) {
 const FIELDS = ['time', 'epicenter', 'magnitude', 'depth', 'intensity', 'area'];
 const emptyReading = () => Object.fromEntries(FIELDS.map((f) => [f, null]));
 
-function buildReadings(atoms) {
+function buildReadings(atoms, ctx) {
   if (atoms.length === 0) return [emptyReading()];
   let assignments = [[]];
   for (const a of atoms) {
@@ -305,6 +308,9 @@ function buildReadings(atoms) {
     (([...byField.values()].some((l) => l.length > 1)) ? conflicted : clean).push(byField);
   }
   const chosen = clean.length ? clean : conflicted;
+  if (clean.length && conflicted.length) {
+    ctx.notes.push('同じ項目が2つになる読み方は候補から外しました（例：すでに規模があるのに、別の数字をさらに規模として読む読み方）。外した読み方の方が正しい場合があります。');
+  }
   const readings = [];
   for (const byField of chosen) {
     let partial = [emptyReading()];
@@ -379,6 +385,7 @@ export function parseFragment(input, options = {}) {
     assumedToday: null,
     assumedYear: false,
     timeRead: false,
+    dateRejected: false,
   };
   const SAFE = '危険かどうか、安全かどうかの判断はしていません。';
   if (now === null) return makeResult(ctx, 'error', null, `現在時刻の指定を読めませんでした。入力は読み取っていません。${SAFE}`);
@@ -401,7 +408,7 @@ export function parseFragment(input, options = {}) {
   const timeFields = buildTimes(liveDates, liveTimes, ctx);
   const allUnits = [...atoms, ...timeFields.map((t) => ({ kind: 'time', options: [{ field: 'time', value: t }] }))];
   // Several time candidates are alternatives of one field, so they stay separate atoms of the same field.
-  const readings = buildReadings(allUnits);
+  const readings = buildReadings(allUnits, ctx);
   if (readings.length > MAX_READINGS) {
     return makeResult(ctx, 'unknown', null, `読み方が${MAX_READINGS}通りを超え、どれにも決められませんでした。短く分けて入力してください。${SAFE}`);
   }
