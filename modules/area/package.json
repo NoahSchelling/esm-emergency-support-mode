@@ -1,0 +1,9 @@
+{
+  "name": "bw-area",
+  "private": true,
+  "type": "module",
+  "description": "On-device lookup of municipality and JMA warning area codes (Shizuoka only)",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
