@@ -31,9 +31,12 @@ export function createSensorState({ kind, env, staleAfterSec }) {
     return makeResult({ kind, ...current, source: env.source });
   }
 
-  function set({ status, value = null, detail, observedAtMs = env.now() }) {
+  // notify=false updates the reading without calling subscribers (used when
+  // read() re-samples a live value).
+  function set({ status, value = null, detail, observedAtMs = env.now() }, { notify = true } = {}) {
     current = { status, value, detail, observedAtMs };
     const result = read();
+    if (!notify) return result;
     for (const fn of [...listeners]) {
       try {
         fn(result);
