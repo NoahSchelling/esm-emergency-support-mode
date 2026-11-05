@@ -9,6 +9,7 @@
 - 試作 C-A（公的発表の受信状況を見せる画面）：[docs/proto/c-a.md](docs/proto/c-a.md)
 - 試作 C-B（発表文の平易な言い換えと、原文との照合）：[docs/proto/c-b.md](docs/proto/c-b.md)。言い換えは原文を加工したもので、気象庁の発表ではありません。照合を通っても正しさは保証されません。
 - センサーのモジュール（位置・揺れ・向き・通信の有無・通信の種類・電池）：[modules/sensors/README.md](modules/sensors/README.md)。揺れの値は端末が記録した生の値で、震度ではありません。地震の発生や強さは判断しません。
+- スマートフォン向けの簡易な画面（モジュールを組み合わせて見せる）：[app/README.md](app/README.md)。実機で確かめる点は [docs/proto/app.md](docs/proto/app.md)。公的発表は試作 C-A から取り次ぎ、つながらないときは「模擬データ」と表示します。
 
 ## モジュール
 
