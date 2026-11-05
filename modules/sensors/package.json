@@ -1,0 +1,9 @@
+{
+  "name": "sensors",
+  "private": true,
+  "type": "module",
+  "description": "Sensor modules for the smartphone web app (no dependencies)",
+  "scripts": {
+    "test": "node --test 'test/*.test.js'"
+  }
+}
