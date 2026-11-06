@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   norm360, angleDiff, bearingDeg, distanceM, compassName, declinationWestDeg, magneticToTrue,
   headingFromSample, sampleFromEvent, screenAngleFrom, tiltDeg, createHeadingTracker, circularStats,
-  courseFrom, BASIS,
+  courseFrom, BASIS, screenArrowDeg, screenUpOffsetDeg,
 } from '../index.js';
 import { startOrientation, currentScreenAngle, requestOrientationPermission } from '../browser/orientation.js';
 
@@ -117,12 +117,98 @@ test('heading: stale, missing, tilted, unknown screen angle, unknown declination
   close(tiltDeg(60, 0), 60, 1e-9);
 });
 
-test('heading: screen rotation adds the screen angle (landscape)', () => {
+test('heading: landscape / upside-down is refused by default (sign not yet checked on devices)', () => {
+  for (const a of [90, 180, 270]) {
+    const r = headingFromSample(ios(0), { ...CTX, screenAngleDeg: a });
+    assert.equal(r.status, 'unknown');
+    assert.match(r.detail, /縦向きで持って/);
+  }
+  assert.equal(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 45 }).status, 'unknown');
+});
+
+test('heading: with landscape allowed, screen-up turns by the screen angle (flat-ish, no roll)', () => {
+  const L = { allowLandscape: true };
   // Device top points magnetic north; rotated so screen-up is the device's right edge.
-  close(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 90 }).value.true_heading_deg, 82.5, 1e-9);
-  close(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 270 }).value.true_heading_deg, 262.5, 1e-9);
-  close(headingFromSample(abs(90), { ...CTX, screenAngleDeg: 90 }).value.true_heading_deg, 352.5, 1e-9);
-  close(headingFromSample(ios(300), { ...CTX, screenAngleDeg: 180 }).value.true_heading_deg, 112.5, 1e-9);
+  close(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 90 }, L).value.true_heading_deg, 82.5, 1e-9);
+  close(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 270 }, L).value.true_heading_deg, 262.5, 1e-9);
+  close(headingFromSample(abs(90), { ...CTX, screenAngleDeg: 90 }, L).value.true_heading_deg, 352.5, 1e-9);
+  close(headingFromSample(ios(300), { ...CTX, screenAngleDeg: 180 }, L).value.true_heading_deg, 112.5, 1e-9);
+});
+
+test('heading: tilt boundary (45 deg allowed, 46 refused) and future samples refused', () => {
+  assert.equal(headingFromSample(ios(90, 10, { beta: 45, gamma: 0 }), CTX).status, 'ok');
+  assert.equal(headingFromSample(ios(90, 10, { beta: 46, gamma: 0 }), CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90, 10, { at_ms: NOW + 1000 }), CTX).status, 'ok');
+  assert.equal(headingFromSample(ios(90, 10, { at_ms: NOW + 10000 }), CTX).status, 'error');
+});
+
+test('tracker: iPhone-style and absolute samples mixed in the window are refused', () => {
+  const t = createHeadingTracker();
+  t.push(ios(90, 10, { at_ms: NOW - 300 }));
+  t.push(abs(270, { at_ms: NOW - 200 })); // same true heading, different source
+  t.push(ios(90, 10, { at_ms: NOW - 100 }));
+  t.push(ios(90, 10, { at_ms: NOW }));
+  assert.equal(t.read(CTX).status, 'unknown');
+});
+
+// ---------------------------------------------------------------- independent physical check
+// Build the device attitude with the W3C rotation (R = Rz(alpha) Rx(beta)
+// Ry(gamma)), draw the arrow on the screen at the angle the module returns,
+// and look at where that arrow points when projected straight down onto the
+// ground. It must point at the target bearing. This does not reuse the
+// module's formulas.
+
+function rotW3C(alpha, beta, gamma) {
+  const r = Math.PI / 180;
+  const [ca, sa, cb, sb, cg, sg] = [Math.cos(alpha * r), Math.sin(alpha * r), Math.cos(beta * r), Math.sin(beta * r), Math.cos(gamma * r), Math.sin(gamma * r)];
+  const Rz = [[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]];
+  const Rx = [[1, 0, 0], [0, cb, -sb], [0, sb, cb]];
+  const Ry = [[cg, 0, sg], [0, 1, 0], [-sg, 0, cg]];
+  const mul = (A, B) => A.map((row) => B[0].map((_, j) => row.reduce((s, v, k) => s + v * B[k][j], 0)));
+  return mul(mul(Rz, Rx), Ry);
+}
+const apply = (M, v) => M.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+// Screen-up and screen-right in device coordinates for each screen angle
+// (90 = device turned counter-clockwise, its right edge is screen-up).
+const SCREEN = { 0: [[0, 1, 0], [1, 0, 0]], 90: [[1, 0, 0], [0, -1, 0]], 180: [[0, -1, 0], [-1, 0, 0]], 270: [[-1, 0, 0], [0, 1, 0]] };
+
+function groundBearingOfScreenArrow(alpha, beta, gamma, screenAngle, thetaDeg) {
+  const [U, R] = SCREEN[screenAngle];
+  const th = (thetaDeg * Math.PI) / 180;
+  const vDev = [0, 1, 2].map((i) => Math.cos(th) * U[i] + Math.sin(th) * R[i]);
+  const w = apply(rotW3C(alpha, beta, gamma), vDev); // east, north, up
+  return norm360((Math.atan2(w[0], w[1]) * 180) / Math.PI);
+}
+
+test('physical check: the drawn arrow points at the target for many attitudes (portrait and landscape)', () => {
+  let n = 0;
+  for (const screenAngle of [0, 90, 180, 270]) {
+    for (const alpha of [0, 37, 123, 250, 359]) {
+      for (const [beta, gamma] of [[0, 0], [20, 0], [40, 10], [-30, 25], [10, -40], [30, 30]]) {
+        if (tiltDeg(beta, gamma) > 45) continue;
+        const sample = abs(alpha, { beta, gamma });
+        const h = headingFromSample(sample, { nowMs: NOW, screenAngleDeg: screenAngle, declinationWestDeg: 0 }, { allowLandscape: true });
+        assert.equal(h.status, 'ok');
+        for (const target of [0, 45, 90, 181, 300]) {
+          const theta = screenArrowDeg(target, h.value);
+          const got = groundBearingOfScreenArrow(alpha, beta, gamma, screenAngle, theta);
+          assert.ok(Math.abs(angleDiff(got, target)) < 1e-6, `a=${alpha} b=${beta} g=${gamma} s=${screenAngle} t=${target}: ${got}`);
+          n++;
+        }
+        // the reported screen-up heading is where an arrow at 0 deg points
+        const up = groundBearingOfScreenArrow(alpha, beta, gamma, screenAngle, 0);
+        assert.ok(Math.abs(angleDiff(up, h.value.true_heading_deg)) < 1e-6);
+      }
+    }
+  }
+  assert.ok(n > 300);
+});
+
+test('physical check: the review example (landscape, beta 30, gamma 30) is no longer 16 deg off', () => {
+  const h = headingFromSample(abs(0, { beta: 30, gamma: 30 }), { nowMs: NOW, screenAngleDeg: 90, declinationWestDeg: 0 }, { allowLandscape: true });
+  close(h.value.true_heading_deg, 73.9, 0.1); // screen-up projected, not 90
+  close(screenUpOffsetDeg(0, 0, 90), 90, 1e-9);
+  close(screenUpOffsetDeg(20, 0, 0), 0, 1e-9);
 });
 
 test('screen angle: APIs, legacy -90, odd values, portrait hint', () => {

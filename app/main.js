@@ -410,7 +410,13 @@ if (modeCtl) {
   lift.type = 'button';
   lift.dataset.sim = 'lift_tsunami_warning';
   lift.textContent = '模擬：津波警報の解除を受けた';
-  lift.addEventListener('click', () => { modeCtl.simulateLift('tsunami_warning'); markSimulated(); renderMode(); });
+  lift.addEventListener('click', () => {
+    modeCtl.simulateLift('tsunami_warning');
+    markSimulated();
+    renderMode();
+    // Tell the evacuee view that the simulated warning was lifted.
+    globalThis.dispatchEvent(new CustomEvent('app:simulated-lift', { detail: { key: 'tsunami_warning' } }));
+  });
   $('mode-sim').append(lift);
   setInterval(() => { modeCtl.tick(); renderMode(); }, MODE_TICK_MS);
 } else {

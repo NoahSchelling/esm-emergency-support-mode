@@ -18,7 +18,7 @@
 // No I/O and no platform APIs (loads in browsers and Node.js).
 
 import { distanceM, bearingDeg, angleDiff, norm360, compassName, declinationWestDeg } from './geo.js';
-import { courseFrom, COURSE_DEFAULTS } from './heading.js';
+import { courseFrom, COURSE_DEFAULTS, CONFIRM_DEFAULTS, HEADING_DEFAULTS, screenArrowDeg, tiltDeg } from './heading.js';
 
 export const KIND = 'evac_direction';
 const SUPPORTED_FORMAT = 'evac-sites/1';
@@ -30,7 +30,15 @@ export const EVAC_DEFAULTS = Object.freeze({
   maxDistanceM: 5000, // ！！仮の値！！ sites farther than this are not offered
   maxAccuracyM: 1000, // ！！仮の値！！ position error above this -> unknown
   maxBearingUncertaintyDeg: 30, // ！！仮の値！！ arrow hidden above this
+  maxPositionAgeMs: 15000, // ！！仮の値！！ arrow hidden when the fix is older
+  maxHeadingAgeMs: HEADING_DEFAULTS.maxAgeMs,
+  maxTiltDeg: HEADING_DEFAULTS.maxTiltDeg,
+  allowLandscape: HEADING_DEFAULTS.allowLandscape,
+  // ！！仮の値！！ A heading without an accuracy value (Android) is used for
+  // the arrow only within confirmValidMs of a match with the GPS course.
+  requireConfirmationWhenAccuracyUnknown: true,
   ...COURSE_DEFAULTS,
+  ...CONFIRM_DEFAULTS,
 });
 
 export const EXCLUSION_DEFAULTS = Object.freeze({
@@ -71,6 +79,17 @@ function result(status, value, detail, source, nowMs) {
     source,
     detail,
   });
+}
+
+// Re-check a heading value from the caller (do not trust its shape).
+function headingShapeOk(hv, o) {
+  const n = (v) => typeof v === 'number' && Number.isFinite(v);
+  if (!n(hv.top_true_heading_deg) || !n(hv.true_heading_deg) || !n(hv.beta) || !n(hv.gamma)) return false;
+  if (![0, 90, 180, 270].includes(hv.screen_angle_deg)) return false;
+  if (hv.screen_angle_deg !== 0 && !o.allowLandscape) return false;
+  if (tiltDeg(hv.beta, hv.gamma) > o.maxTiltDeg) return false;
+  if (hv.accuracy_deg !== null && !n(hv.accuracy_deg)) return false;
+  return true;
 }
 
 // Round an angle to 0.1 degree and keep it in [0, 360) (359.96 -> 0, not 360).
@@ -144,12 +163,15 @@ export function hazardLabel(data, key) {
 // ------------------------------------------------------------ exclusions
 
 // Create an exclusion around `centerDeg` (true bearing) starting now.
+// `siteId` (optional) also excludes that site itself, so it does not come
+// back when the person moves and its bearing changes.
 export function createExclusion(centerDeg, nowMs, opts = {}) {
   const o = { ...EXCLUSION_DEFAULTS, ...opts };
   if (!Number.isFinite(centerDeg)) throw new RangeError('centerDeg must be a number');
   return Object.freeze({
     center_deg: norm360(centerDeg),
     half_width_deg: o.halfWidthDeg,
+    site_id: typeof o.siteId === 'string' ? o.siteId : null,
     created_ms: nowMs,
     until_ms: nowMs + o.durationMin * 60000,
   });
@@ -162,6 +184,10 @@ export function activeExclusions(list, nowMs) {
 
 export function isExcluded(bearing, exclusions) {
   return exclusions.some((x) => Math.abs(angleDiff(bearing, x.center_deg)) <= x.half_width_deg);
+}
+
+function isExcludedSite(id, exclusions) {
+  return exclusions.some((x) => x.site_id === id);
 }
 
 // ------------------------------------------------------------ text
@@ -190,6 +216,9 @@ function err(detail, source, nowMs) {
  *   exclusions                      // from createExclusion() (optional)
  *   heading                         // result of createHeadingTracker().read() (optional)
  *   course                          // { heading_deg, speed_mps, at_ms } from GPS (optional)
+ *   position_at_ms                  // time the position was obtained (needed for an arrow)
+ *   compass_confirmed_at_ms         // from createCompassCheck() (needed for an arrow when
+ *                                   //   the heading has no accuracy value, i.e. Android)
  *   source                          // 'simulated' for mock / replay input
  * }
  * options: { now, ...EVAC_DEFAULTS overrides }
@@ -226,7 +255,7 @@ export function computeEvacDirections(data, input, options = {}) {
     if (d > o.maxDistanceM) continue;
     const bearingKnown = d > acc;
     const b = bearingDeg(la, lo, data.lat[i], data.lon[i]);
-    if (bearingKnown && excl.length && isExcluded(b, excl)) {
+    if (excl.length && (isExcludedSite(s.id, excl) || (bearingKnown && isExcluded(b, excl)))) {
       excludedCount++;
       continue;
     }
@@ -240,6 +269,7 @@ export function computeEvacDirections(data, input, options = {}) {
     half_width_deg: x.half_width_deg,
     until: toIsoJst(x.until_ms),
     until_ms: x.until_ms,
+    site_id: x.site_id,
     text: `${directionText(x.center_deg)}の前後 ${x.half_width_deg} 度`,
   }));
 
@@ -247,7 +277,7 @@ export function computeEvacDirections(data, input, options = {}) {
     const why = [
       `${hLabel}に対応した指定緊急避難場所は、データの中に見つかりません（直線で約 ${o.maxDistanceM / 1000} km 以内）。`,
       '近くに避難場所がないという意味ではありません。',
-      excludedCount ? `「通れない」として除外した方向にある ${excludedCount} か所は数えていません。` : '',
+      excludedCount ? `「通れない」として除外した ${excludedCount} か所は数えていません。` : '',
       data.coverage_note,
       '市町村の発表とハザードマップを確かめてください。',
     ].filter(Boolean).join('');
@@ -257,14 +287,33 @@ export function computeEvacDirections(data, input, options = {}) {
   // ---- heading / arrow decision (a wrong arrow is worse than none)
   const decl = declinationWestDeg(la, lo);
   const heading = input.heading ?? null;
+  const hv = heading?.status === 'ok' ? heading.value : null;
   const course = courseFrom(input.course, nowMs, o);
+  const posAt = input.position_at_ms;
+  const posAgeMs = Number.isFinite(posAt) ? nowMs - posAt : null;
+  const confirmedAt = input.compass_confirmed_at_ms;
   let arrow = { show: false, reason: '' };
-  if (!heading || heading.status !== 'ok' || !heading.value) {
+  if (!hv) {
     arrow.reason = heading?.detail || '端末の向きが分かりません。';
+  } else if (!headingShapeOk(hv, o)) {
+    arrow.reason = '端末の向きの値の形が想定と違うため、矢印を出しません。';
+  } else if (!Number.isFinite(hv.at_ms) || nowMs - hv.at_ms > o.maxHeadingAgeMs || hv.at_ms - nowMs > 1000) {
+    arrow.reason = '端末の向きの値が古い、または時刻が分からないため、矢印を出しません。';
   } else if (decl === null) {
     arrow.reason = '磁北と真北のずれ（偏角）が分からないため、矢印を出しません。';
-  } else if (course.usable && Math.abs(angleDiff(heading.value.true_heading_deg, course.heading_deg)) > o.maxMismatchDeg) {
+  } else if (posAgeMs === null || posAgeMs < -1000) {
+    arrow.reason = '位置を取った時刻が分からないため、矢印を出しません。';
+  } else if (posAgeMs > o.maxPositionAgeMs) {
+    arrow.reason = `位置が ${Math.round(posAgeMs / 1000)} 秒前のもので、そのあと動いているかもしれないため、矢印を出しません。`;
+  } else if (course.usable && Math.abs(angleDiff(hv.top_true_heading_deg, course.heading_deg)) > o.maxMismatchDeg) {
     arrow.reason = '端末の向きと GPS の進行方向が大きく食い違っているため、矢印を出しません。';
+  } else if (o.requireConfirmationWhenAccuracyUnknown && hv.accuracy_deg === null && course.usable
+    && Math.abs(angleDiff(hv.top_true_heading_deg, course.heading_deg)) > o.matchDeg) {
+    // While walking, a heading without accuracy must keep agreeing with the course.
+    arrow.reason = 'この端末からは方位の精度が分からず、いまは GPS の進行方向と一致していないため、矢印を出していません。';
+  } else if (o.requireConfirmationWhenAccuracyUnknown && hv.accuracy_deg === null
+    && !(Number.isFinite(confirmedAt) && nowMs - confirmedAt <= o.validMs && confirmedAt - nowMs <= 1000)) {
+    arrow.reason = 'この端末からは方位の精度が分からないため、矢印を出していません。端末の上を進む方向に向けて歩くと、GPS の進行方向と照らし合わせて確かめます。';
   } else {
     arrow = { show: true, reason: '' };
   }
@@ -272,7 +321,9 @@ export function computeEvacDirections(data, input, options = {}) {
   const candidates = top.map(({ i, d, b }) => {
     const s = data.sites[i];
     const unc = b === null ? null : Math.asin(Math.min(1, acc / d)) * 180 / Math.PI;
-    const arrowOk = arrow.show && b !== null && unc <= o.maxBearingUncertaintyDeg;
+    const raw = arrow.show && b !== null && unc <= o.maxBearingUncertaintyDeg ? screenArrowDeg(b, hv) : null;
+    // Never fall back to "straight up" when the geometry cannot be solved.
+    const arrowOk = Number.isFinite(raw);
     return {
       id: s.id,
       name: s.name,
@@ -284,11 +335,12 @@ export function computeEvacDirections(data, input, options = {}) {
       direction_text: b === null
         ? `位置の誤差（約 ${Math.round(acc)} m）より近いため、方向を示せません。`
         : directionText(b, unc),
-      arrow_deg: arrowOk ? round1(b - heading.value.true_heading_deg) : null,
+      arrow_deg: arrowOk ? round1(raw) : null,
       arrow_reason: arrowOk ? ''
         : !arrow.show ? arrow.reason
           : b === null ? '位置の誤差より近いため、矢印を出しません。'
-            : `位置の誤差のため方向の幅が大きく（±${Math.round(unc)}度）、矢印を出しません。`,
+            : unc > o.maxBearingUncertaintyDeg ? `位置の誤差のため方向の幅が大きく（±${Math.round(unc)}度）、矢印を出しません。`
+              : '矢印の向きを計算できないため、矢印を出しません。',
       course_relative_deg: course.usable && b !== null ? Math.round(angleDiff(b, course.heading_deg)) : null,
       hazards: data.hazards.filter((_, k) => s.flags[k] === '1').map((h) => h.label),
       remarks: s.remarks,
@@ -299,16 +351,15 @@ export function computeEvacDirections(data, input, options = {}) {
     hazard: { key: hazard, label: hLabel },
     candidates,
     arrow,
-    heading: heading?.status === 'ok'
-      ? { status: 'ok', true_heading_deg: round1(heading.value.true_heading_deg), basis: heading.value.basis, detail: heading.detail }
-      : { status: heading?.status ?? 'unknown', true_heading_deg: null, basis: null, detail: heading?.detail ?? '端末の向きが分かりません。' },
-    declination_west_deg: decl === null ? null : Math.round(decl * 100) / 100,
+    heading: hv
+      ? { status: 'ok', true_heading_deg: round1(hv.true_heading_deg), basis: hv.basis, accuracy_known: hv.accuracy_deg !== null, detail: heading.detail }
+      : { status: heading?.status ?? 'unknown', true_heading_deg: null, basis: null, accuracy_known: false, detail: heading?.detail ?? '端末の向きが分かりません。' },
+    position_age_s: posAgeMs === null ? null : Math.max(0, Math.round(posAgeMs / 1000)),
     course: course.usable
       ? { show: true, heading_deg: Math.round(course.heading_deg), speed_mps: course.speed_mps, text: `いま進んでいる方向（GPS）：${directionText(course.heading_deg)}` }
       : { show: false, heading_deg: null, speed_mps: null, text: course.reason },
     exclusions: exclusionsOut,
     excluded_count: excludedCount,
-    accuracy_m: Math.round(acc),
     straight_line_note: STRAIGHT_LINE_NOTE,
     coverage_note: data.coverage_note,
     notices: data.notices,
@@ -320,7 +371,7 @@ export function computeEvacDirections(data, input, options = {}) {
   const detail = [
     `${hLabel}に対応した、公的に指定された避難場所（指定緊急避難場所）への${STRAIGHT_LINE_NOTE}`,
     '近い順に示します。安全かどうか、通れるかどうかは判断していません。',
-    excludedCount ? `「通れない」として除外した方向にある ${excludedCount} か所は外しています。` : '',
+    excludedCount ? `「通れない」として除外した ${excludedCount} か所は外しています。` : '',
     data.coverage_note,
   ].filter(Boolean).join('');
   return result('ok', value, detail, source, nowMs);

@@ -12,8 +12,10 @@ export const SCENARIOS = Object.freeze({
   tsunami: Object.freeze({
     hazard: 'tsunami',
     label: '津波の模擬',
-    instruction: '【模擬】津波警報が出たという想定です。沿岸部や川沿いにいる人は、ただちに高台や避難ビルへ避難してください。',
-    origin: '模擬の公的発表の文です。気象庁・市町村の発表ではありません。',
+    // Quoted as the text of a simulated announcement, not as the app's own words.
+    instruction: '【模擬】津波警報（模擬）の発表文：「沿岸部や川沿いにいる人は、ただちに高台や避難ビルへ避難してください。」',
+    origin: '訓練用の模擬の発表です。気象庁・市町村の発表ではありません。実際の避難は、公的な発表と指示に従ってください。',
+    lifted: '【模擬】津波警報（模擬）の解除を受けたため、方向の表示をやめました。市町村の発表を確かめてください。',
   }),
 });
 
@@ -25,7 +27,7 @@ const SIM_KEY_TO_SCENARIO = Object.freeze({
 });
 
 export function scenarioFromSimKey(key) {
-  return SIM_KEY_TO_SCENARIO[key] ?? null;
+  return Object.hasOwn(SIM_KEY_TO_SCENARIO, key) ? SIM_KEY_TO_SCENARIO[key] : null;
 }
 
 // "?sim=tsunami" starts the tsunami mock (for demos and automated checks).
@@ -77,7 +79,7 @@ function courseRelText(rel) {
  * state: { scenario, location (sensor result or null), dataError (string|null),
  *          result (computeEvacDirections result or null), nowMs }
  */
-export function evacViewModel({ scenario = null, location = null, dataError = null, result = null, nowMs }) {
+export function evacViewModel({ scenario = null, lifted = null, location = null, dataError = null, result = null, nowMs }) {
   const sc = scenario ? SCENARIOS[scenario] : null;
   const base = {
     instruction: sc ? sc.instruction : '',
@@ -95,7 +97,12 @@ export function evacViewModel({ scenario = null, location = null, dataError = nu
     canExclude: false,
     showFallback: false,
     notes: [],
+    excludeTarget: null,
+    positionAgeText: '',
   };
+  if (!sc && lifted && SCENARIOS[lifted]) {
+    return { ...base, instruction: SCENARIOS[lifted].lifted, instructionOrigin: SCENARIOS[lifted].origin, message: SCENARIOS[lifted].lifted, showFallback: true };
+  }
   if (!sc) {
     return {
       ...base,
@@ -116,7 +123,7 @@ export function evacViewModel({ scenario = null, location = null, dataError = nu
   }
   const v = result.value;
   const [first, ...rest] = v.candidates;
-  const arrowOk = first.arrow_deg !== null;
+  const arrowOk = Number.isFinite(first.arrow_deg);
   const primary = {
     name: first.name,
     municipality: first.municipality ?? '',
@@ -137,6 +144,8 @@ export function evacViewModel({ scenario = null, location = null, dataError = nu
     courseText: v.course.show ? v.course.text : '',
     exclusions: v.exclusions.map((x) => ({ text: `${x.text}（${formatJstHm(x.until_ms)} まで）`, until_ms: x.until_ms, center_deg: x.center_deg })),
     canExclude: first.bearing_deg !== null,
+    excludeTarget: first.bearing_deg !== null ? { bearing_deg: first.bearing_deg, site_id: first.id } : null,
+    positionAgeText: v.position_age_s !== null && v.position_age_s >= 15 ? `この位置は約 ${v.position_age_s} 秒前に取ったものです。` : '',
     notes: [v.coverage_note],
   };
 }

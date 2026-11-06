@@ -11,18 +11,27 @@ import {
 import { loadEvacData, computeEvacDirections } from '../../modules/evac/node.js';
 
 const NOW = Date.parse('2026-11-07T12:00:00+09:00');
-const SAFE_CLAIM = /安全です|安全な場所|安全を確認|異常なし|異常はありません|正常|問題ありません|大丈夫/;
+const SAFE_CLAIM = /安全です|安全な場所|安全を確認|異常なし|異常はありません|正常|問題ありません|大丈夫|危険はありません|安心|心配ありません|避難できます|通れます/;
 const data = await loadEvacData();
 const LOC = { status: 'ok', value: { latitude: 34.9769, longitude: 138.3831, accuracy_m: 20 }, detail: '', source: 'device' };
 
 function compute(extra = {}) {
-  return computeEvacDirections(data, { latitude: 34.9769, longitude: 138.3831, accuracy: 20, hazard: 'tsunami', ...extra }, { now: NOW });
+  return computeEvacDirections(data, { latitude: 34.9769, longitude: 138.3831, accuracy: 20, hazard: 'tsunami', position_at_ms: NOW, ...extra }, { now: NOW });
 }
+const HEADING_OK = {
+  status: 'ok',
+  value: { top_true_heading_deg: 0, true_heading_deg: 0, beta: 0, gamma: 0, screen_angle_deg: 0, tilt_deg: 0, accuracy_deg: 10, basis: 'ios_compass', at_ms: NOW },
+  detail: '',
+};
 
 test('scenario: only the tsunami mock, marked as simulated', () => {
   assert.deepEqual(Object.keys(SCENARIOS), ['tsunami']);
   assert.match(SCENARIOS.tsunami.instruction, /^【模擬】/);
+  // quoted as the text of a simulated announcement, not the app's own words
+  assert.match(SCENARIOS.tsunami.instruction, /発表文：「.+」$/);
   assert.match(SCENARIOS.tsunami.origin, /気象庁・市町村の発表ではありません/);
+  assert.match(SCENARIOS.tsunami.lifted, /^【模擬】.*解除/);
+  assert.equal(scenarioFromSimKey('toString'), null);
   assert.equal(scenarioFromSimKey('tsunami_warning'), 'tsunami');
   assert.equal(scenarioFromSimKey('major_tsunami_warning'), 'tsunami');
   assert.equal(scenarioFromSimKey('heavy_rain_warning'), null);
@@ -75,8 +84,7 @@ test('view: no heading -> text mode with north-up bearing, no arrow', () => {
 });
 
 test('view: heading ok -> arrow mode', () => {
-  const heading = { status: 'ok', value: { true_heading_deg: 0, basis: 'ios_compass' }, detail: '' };
-  const r = compute({ heading });
+  const r = compute({ heading: HEADING_OK });
   const m = evacViewModel({ scenario: 'tsunami', location: LOC, result: r, nowMs: NOW });
   assert.equal(m.mode, 'arrow');
   assert.equal(m.arrowDeg, r.value.candidates[0].arrow_deg);
@@ -125,4 +133,31 @@ test('evac sources: no innerHTML, no external scripts, no green, no input fields
   assert.ok(evacPart.length > 100);
   assert.doesNotMatch(evacPart, /<input|<textarea|<select/);
   assert.match(evacPart, /直線の方向です。道順ではありません。/);
+});
+
+test('view: simulated lift stops the direction display and says so', () => {
+  const m = evacViewModel({ scenario: null, lifted: 'tsunami', location: LOC, result: null, nowMs: NOW });
+  assert.equal(m.mode, 'message');
+  assert.equal(m.primary, null);
+  assert.match(m.message, /解除を受けたため、方向の表示をやめました/);
+  assert.match(m.instruction, /^【模擬】/);
+  assert.equal(m.showFallback, true);
+});
+
+test('view: an old position is told, and the exclusion target carries the site id', () => {
+  const r = compute({ position_at_ms: NOW - 20_000, heading: HEADING_OK });
+  const m = evacViewModel({ scenario: 'tsunami', location: LOC, result: r, nowMs: NOW });
+  assert.equal(m.mode, 'text');
+  assert.match(m.positionAgeText, /約 20 秒前/);
+  assert.match(m.arrowReason, /20 秒前/);
+  assert.equal(m.excludeTarget.site_id, r.value.candidates[0].id);
+  const fresh = evacViewModel({ scenario: 'tsunami', location: LOC, result: compute({ heading: HEADING_OK }), nowMs: NOW });
+  assert.equal(fresh.positionAgeText, '');
+});
+
+test('view: a non-finite arrow angle is never drawn', () => {
+  const r = compute({ heading: HEADING_OK });
+  const fake = JSON.parse(JSON.stringify(r));
+  fake.value.candidates[0].arrow_deg = NaN;
+  assert.equal(evacViewModel({ scenario: 'tsunami', location: LOC, result: fake, nowMs: NOW }).mode, 'text');
 });

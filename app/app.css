@@ -77,9 +77,9 @@ a { color: inherit; }
 
 /* ---------------------------------------------------------------- view switch + evacuee view
    Large text, one-hand buttons, no green (BW-S3). */
-:root { --arrow: #0b3d91; --accent-bg: #fff3d6; --accent-fg: #3d2600; }
+:root { --arrow: #0b3d91; --dial: #7a3d00; --accent-bg: #fff3d6; --accent-fg: #3d2600; }
 @media (prefers-color-scheme: dark) {
-  :root { --arrow: #9cc3ff; --accent-bg: #3d2a00; --accent-fg: #ffe9b8; }
+  :root { --arrow: #9cc3ff; --dial: #ffc48a; --accent-bg: #3d2a00; --accent-fg: #ffe9b8; }
 }
 .view-switch { display: flex; gap: 0; max-width: 760px; margin: 8px auto 0; padding: 0 16px; }
 .view-switch button {
@@ -102,8 +102,9 @@ main.evac { font-size: 1.15rem; line-height: 1.55; }
 .evac-ring { fill: none; stroke: var(--line); stroke-width: 3; }
 .evac-n { fill: var(--fg); font-size: 22px; font-weight: bold; }
 .evac-dir { fill: var(--muted); font-size: 16px; }
-.evac-bearing { stroke: var(--arrow); stroke-width: 6; stroke-linecap: round; }
-.evac-bearing-head { fill: var(--arrow); }
+.evac-north-svg { width: min(56vw, 210px); }
+.evac-bearing { stroke: var(--dial); stroke-width: 4; stroke-dasharray: 6 6; }
+.evac-bearing-dot { fill: var(--dial); stroke: var(--bg); stroke-width: 3; }
 .evac-center { fill: var(--fg); }
 .evac-name { font-size: 1.5rem; font-weight: bold; line-height: 1.35; }
 .evac-muni { color: var(--muted); }

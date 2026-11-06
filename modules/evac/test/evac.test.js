@@ -14,7 +14,7 @@ const NOW = Date.parse('2026-11-07T12:00:00+09:00');
 const P = { latitude: 35.0, longitude: 138.0 }; // fictional round-number point
 const HAZARD_KEYS = ['flood', 'landslide', 'storm_surge', 'earthquake', 'tsunami', 'large_fire', 'inland_flood', 'volcano'];
 const HAZARD_LABELS = ['洪水', '崖崩れ、土石流及び地滑り', '高潮', '地震', '津波', '大規模な火事', '内水氾濫', '火山現象'];
-const SAFE_CLAIM = /安全です|安全な場所|安全を確認|異常なし|異常はありません|正常|問題ありません|大丈夫|近くにありません/;
+const SAFE_CLAIM = /安全です|安全な場所|安全を確認|異常なし|異常はありません|正常|問題ありません|大丈夫|近くにありません|危険はありません|安心|心配ありません|避難できます|通れます/;
 
 function flags(...keys) {
   return HAZARD_KEYS.map((k) => (keys.includes(k) ? '1' : '0')).join('');
@@ -47,12 +47,20 @@ function synthetic(extraSites = []) {
 }
 
 const data = synthetic();
-const run = (input, opts = {}) => computeEvacDirections(data, { ...P, accuracy: 10, hazard: 'tsunami', ...input }, { now: NOW, ...opts });
+const run = (input, opts = {}) => computeEvacDirections(data, { ...P, accuracy: 10, hazard: 'tsunami', position_at_ms: NOW, ...input }, { now: NOW, ...opts });
 
-// A heading tracker result as the app would pass it.
-function headingOk(trueHeading) {
-  return { status: 'ok', value: { true_heading_deg: trueHeading, basis: 'ios_compass' }, detail: 'テスト' };
+// A heading tracker result as the app would pass it (portrait, lying flat).
+function headingOk(trueHeading, extra = {}) {
+  return {
+    status: 'ok',
+    value: {
+      top_true_heading_deg: trueHeading, true_heading_deg: trueHeading, beta: 0, gamma: 0,
+      screen_angle_deg: 0, tilt_deg: 0, accuracy_deg: 10, basis: 'ios_compass', at_ms: NOW, ...extra,
+    },
+    detail: 'テスト',
+  };
 }
+const androidHeading = (h) => headingOk(h, { accuracy_deg: null, basis: 'absolute_orientation' });
 
 function assertShape(r) {
   assert.deepEqual(Object.keys(r).sort(), ['detail', 'kind', 'observed_at', 'source', 'status', 'value']);
@@ -208,9 +216,10 @@ test('exclusion: hides the current direction and moves to the next candidate', (
   const r = run({ exclusions: [ex] });
   assert.deepEqual(r.value.candidates.map((c) => c.id), ['T-E', 'T-W']);
   assert.equal(r.value.excluded_count, 1); // T-FAR is beyond 5 km anyway
+  assert.equal(r.status, 'ok');
   assert.equal(r.value.exclusions.length, 1);
   assert.match(r.value.exclusions[0].text, /北から約 0 度（北）の方向の前後 30 度/);
-  assert.match(r.detail, /除外した方向/);
+  assert.match(r.detail, /除外した 1 か所/);
 });
 
 test('exclusion: boundary of the range and the 0/360 wrap', () => {
@@ -231,7 +240,7 @@ test('exclusion: expires, can be undone, and all-excluded gives unknown', () => 
   const all = [createExclusion(0, NOW), createExclusion(90, NOW), createExclusion(270, NOW)];
   const r = run({ exclusions: all });
   assert.equal(r.status, 'unknown');
-  assert.match(r.detail, /除外した方向にある 3 か所/);
+  assert.match(r.detail, /除外した 3 か所/);
   assert.match(r.detail, /データの中に見つかりません/);
   assert.throws(() => createExclusion(NaN, NOW));
 });
@@ -244,6 +253,8 @@ test('privacy: the result never contains the position', () => {
   assert.doesNotMatch(s, /"(latitude|longitude|lat|lon)"/);
   // site coordinates are not echoed either (they would let anyone rebuild the position)
   assert.doesNotMatch(s, /35\.006|137\.978/);
+  // nor values derived from the position (declination, accuracy)
+  assert.doesNotMatch(s, /declination|accuracy_m/);
 });
 
 test('wording: no safety claims, no shindo, no injury words', () => {
@@ -277,7 +288,8 @@ test('works with a real heading tracker result', () => {
     t.push({ type: 'deviceorientationabsolute', alpha: 0, beta: 10, gamma: 0, absolute: true, webkit_heading: null, webkit_accuracy: null, at_ms: NOW - dt });
   }
   const heading = t.read({ nowMs: NOW, screenAngleDeg: 0, declinationWestDeg: 7.5 });
-  const r = run({ heading });
+  // Android-like heading (no accuracy): confirmed by a recent GPS match
+  const r = run({ heading, compass_confirmed_at_ms: NOW - 1000 });
   assert.equal(r.value.arrow.show, true);
   // top points magnetic north = true 352.5; east site at 90 -> turn 97.5 right
   assert.ok(Math.abs(r.value.candidates[1].arrow_deg - 97.5) < 0.2);
@@ -348,5 +360,99 @@ test('module sources: no platform APIs in the pure files, no network in them', a
     const src = await readFile(new URL(f, import.meta.url), 'utf8');
     const code = src.replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(code, /\bfetch\(|XMLHttpRequest|sendBeacon|WebSocket|navigator\.|window\.|document\./, f);
+  }
+});
+
+
+// ---------------------------------------------------------------- review fixes (2026-11-07)
+
+test('position age: a fix older than 15 s, or without a time, gives no arrow', () => {
+  const ok = run({ heading: headingOk(0), position_at_ms: NOW - 14000 });
+  assert.equal(ok.value.arrow.show, true);
+  assert.equal(ok.value.position_age_s, 14);
+  const old = run({ heading: headingOk(0), position_at_ms: NOW - 16000 });
+  assert.equal(old.value.arrow.show, false);
+  assert.match(old.value.arrow.reason, /16 秒前/);
+  assert.ok(old.value.candidates.every((c) => c.arrow_deg === null));
+  // the text direction is still given
+  assert.match(old.value.candidates[0].direction_text, /北から約/);
+  const none = run({ heading: headingOk(0), position_at_ms: undefined });
+  assert.equal(none.value.arrow.show, false);
+  assert.match(none.value.arrow.reason, /時刻が分からない/);
+});
+
+test('heading age is checked here too (not only in the tracker)', () => {
+  assert.equal(run({ heading: headingOk(0, { at_ms: NOW - 3600_000 }) }).value.arrow.show, false);
+  assert.equal(run({ heading: headingOk(0, { at_ms: NOW + 60_000 }) }).value.arrow.show, false);
+});
+
+test('Android (no accuracy): no arrow until confirmed by the GPS course; expires', () => {
+  const none = run({ heading: androidHeading(0) });
+  assert.equal(none.value.arrow.show, false);
+  assert.match(none.value.arrow.reason, /精度が分からない/);
+  assert.equal(none.value.heading.accuracy_known, false);
+  assert.equal(run({ heading: androidHeading(0), compass_confirmed_at_ms: NOW - 19_000 }).value.arrow.show, true);
+  assert.equal(run({ heading: androidHeading(0), compass_confirmed_at_ms: NOW - 21_000 }).value.arrow.show, false);
+  // while walking, it must keep agreeing with the course (25 deg off -> no arrow)
+  const walking = run({ heading: androidHeading(0), compass_confirmed_at_ms: NOW, course: { heading_deg: 25, speed_mps: 1.5, at_ms: NOW } });
+  assert.equal(walking.value.arrow.show, false);
+  assert.match(walking.value.arrow.reason, /一致していない/);
+  // an iPhone heading with a good accuracy needs no confirmation
+  assert.equal(run({ heading: headingOk(0) }).value.arrow.show, true);
+});
+
+test('compass check: a match confirms, a large mismatch clears', async () => {
+  const { createCompassCheck, courseFrom } = await import('../heading.js');
+  const chk = createCompassCheck();
+  const moving = (deg) => courseFrom({ heading_deg: deg, speed_mps: 1.5, at_ms: NOW }, NOW);
+  chk.update(androidHeading(10), moving(30), NOW); // 20 deg apart -> match
+  assert.equal(chk.confirmedAtMs, NOW);
+  chk.update(androidHeading(10), courseFrom({ heading_deg: 200, speed_mps: 0.2, at_ms: NOW }, NOW), NOW + 1); // standing still
+  assert.equal(chk.confirmedAtMs, NOW);
+  chk.update(androidHeading(10), moving(35), NOW + 2); // 25 deg: no longer a match -> clears
+  assert.equal(chk.confirmedAtMs, null);
+  chk.update(androidHeading(10), moving(10), NOW + 3);
+  assert.equal(chk.confirmedAtMs, NOW + 3);
+  chk.update({ status: 'stale', value: null }, moving(10), NOW + 4); // heading gap clears
+  assert.equal(chk.confirmedAtMs, null);
+});
+
+test('exclusion with the site id: the site does not come back after moving', () => {
+  const first = run({}).value.candidates[0];
+  assert.equal(first.id, 'T-N');
+  const ex = createExclusion(first.bearing_deg, NOW, { siteId: first.id });
+  assert.equal(ex.site_id, 'T-N');
+  // move about 900 m east: T-N is now to the north-west (outside 0 +/- 30)
+  const at = { latitude: 35.0, longitude: 138.0099, accuracy: 10, hazard: 'tsunami', position_at_ms: NOW };
+  const moved = computeEvacDirections(data, { ...at, exclusions: [ex] }, { now: NOW });
+  assert.ok(!moved.value.candidates.some((c) => c.id === 'T-N'));
+  // with a direction-only exclusion it would come back
+  const dirOnly = computeEvacDirections(data, { ...at, exclusions: [createExclusion(first.bearing_deg, NOW)] }, { now: NOW });
+  assert.ok(dirOnly.value.candidates.some((c) => c.id === 'T-N'));
+});
+
+test('bearing uncertainty boundary: about 30 deg still allows the arrow, more does not', () => {
+  // asin(acc / d) = 30 deg -> acc = d / 2. T-E is about 1002 m away.
+  const d = run({}).value.candidates.find((c) => c.id === 'T-E').distance_m;
+  const at = run({ accuracy: d / 2 - 1, heading: headingOk(0) }).value.candidates.find((c) => c.id === 'T-E');
+  assert.ok(at.arrow_deg !== null, JSON.stringify(at));
+  const over = run({ accuracy: d / 2 + 5, heading: headingOk(0) }).value.candidates.find((c) => c.id === 'T-E');
+  assert.equal(over.arrow_deg, null);
+});
+
+test('malformed heading values never fall back to an arrow pointing up (N1)', () => {
+  const bad = [
+    headingOk(0, { screen_angle_deg: undefined }),
+    headingOk(0, { beta: 90 }), // screen normal horizontal
+    headingOk(0, { beta: undefined }),
+    headingOk(0, { screen_angle_deg: 90 }), // landscape not allowed
+    headingOk(0, { beta: 50 }), // beyond the tilt limit
+    headingOk(NaN),
+    headingOk(0, { accuracy_deg: 'x' }),
+  ];
+  for (const h of bad) {
+    const r = run({ heading: h });
+    assert.equal(r.value.arrow.show, false, JSON.stringify(h.value));
+    assert.ok(r.value.candidates.every((c) => c.arrow_deg === null));
   }
 });

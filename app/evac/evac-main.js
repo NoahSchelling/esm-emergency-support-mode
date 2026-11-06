@@ -47,12 +47,16 @@ if (evacOk) {
 }
 
 const tracker = evacOk ? E.createHeadingTracker() : null;
+// Android gives no compass accuracy: its heading is used for the arrow only
+// shortly after it agreed with the GPS course.
+const compassCheck = evacOk ? E.createCompassCheck() : null;
 const locSensor = sensorsOk ? S.createLocationSensor({ env: S.createDeviceEnv() }) : null;
 let orientation = null;
 
 // ---------------------------------------------------------------- scenario & reception
 
 let scenario = parseSimParam(globalThis.location?.search);
+let lifted = null;
 let reception = scenario ? { receivedMs: Date.now(), simulated: true } : null;
 let simulated = Boolean(scenario);
 
@@ -61,8 +65,19 @@ globalThis.addEventListener('app:simulated-public', (ev) => {
   const sc = scenarioFromSimKey(ev.detail?.key);
   if (sc) {
     scenario = sc;
+    lifted = null;
     reception = { receivedMs: Date.now(), simulated: true };
     simulated = true;
+  }
+});
+// From the supporter view: a simulated lift (解除) of the announcement.
+globalThis.addEventListener('app:simulated-lift', (ev) => {
+  const sc = scenarioFromSimKey(ev.detail?.key);
+  if (sc && scenario === sc) {
+    lifted = sc;
+    scenario = null;
+    exclusions = [];
+    reception = { receivedMs: Date.now(), simulated: true };
   }
 });
 // From the supporter view: the latest reception of public information.
@@ -81,7 +96,7 @@ let current = null; // last computeEvacDirections result
 $('evac-exclude').addEventListener('click', () => {
   const c = current?.status === 'ok' ? current.value.candidates[0] : null;
   if (!evacOk || !c || c.bearing_deg === null) return;
-  exclusions.push(E.createExclusion(c.bearing_deg, Date.now()));
+  exclusions.push(E.createExclusion(c.bearing_deg, Date.now(), { siteId: c.id }));
   render();
 });
 
@@ -134,11 +149,13 @@ function drawNorthUp(bearing) {
     tx.textContent = t;
     s.append(tx);
   }
+  // A dot on the dial and a dashed line, deliberately NOT an arrow: this
+  // figure does not turn with the device.
   const g = svg('g', { transform: `rotate(${bearing})` });
-  g.append(svg('line', { x1: 0, y1: 0, x2: 0, y2: -66, class: 'evac-bearing' }));
-  g.append(svg('path', { d: 'M0,-74 L10,-56 L-10,-56 Z', class: 'evac-bearing-head' }));
+  g.append(svg('line', { x1: 0, y1: 0, x2: 0, y2: -80, class: 'evac-bearing' }));
+  g.append(svg('circle', { cx: 0, cy: -80, r: 11, class: 'evac-bearing-dot' }));
   s.append(g);
-  s.append(svg('circle', { cx: 0, cy: 0, r: 5, class: 'evac-center' }));
+  s.append(svg('circle', { cx: 0, cy: 0, r: 4, class: 'evac-center' }));
   return s;
 }
 
@@ -159,19 +176,24 @@ function render() {
       screenAngleDeg: E.currentScreenAngle(),
       declinationWestDeg: E.declinationWestDeg(v.latitude, v.longitude),
     });
+    const fixAt = Date.parse(loc.observed_at);
+    const course = { heading_deg: v.heading_deg, speed_mps: v.speed_mps, at_ms: fixAt };
+    compassCheck.update(heading, E.courseFrom(course, now), now);
     current = E.computeEvacDirections(data, {
       latitude: v.latitude,
       longitude: v.longitude,
       accuracy: v.accuracy_m,
       hazard: SCENARIOS[scenario].hazard,
       heading,
-      course: { heading_deg: v.heading_deg, speed_mps: v.speed_mps, at_ms: Date.parse(loc.observed_at) },
+      course,
+      position_at_ms: fixAt,
+      compass_confirmed_at_ms: compassCheck.confirmedAtMs,
       exclusions,
       ...(simulated || loc.source === 'simulated' ? { source: 'simulated' } : {}),
     }, { now });
   }
   exclusions = evacOk ? E.activeExclusions(exclusions, now) : [];
-  const m = evacViewModel({ scenario, location: loc, dataError, result: current, nowMs: now });
+  const m = evacViewModel({ scenario, lifted, location: loc, dataError, result: current, nowMs: now });
 
   $('view-evac').dataset.mode = m.mode;
   setText('evac-instruction', m.instruction);
@@ -203,6 +225,7 @@ function render() {
   setText('evac-hazards', p ? p.hazards : '');
   setText('evac-remarks', p ? p.remarks : '');
   setText('evac-course', [m.courseText, p?.courseRel].filter(Boolean).join(' '));
+  setText('evac-position-age', m.positionAgeText);
 
   $('evac-exclude').disabled = !m.canExclude;
   const ex = $('evac-exclusions');

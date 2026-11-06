@@ -51,7 +51,36 @@ const IPHONE_INIT = () => {
   DeviceOrientationEvent.requestPermission = () => { window.__permCalls++; return Promise.resolve('granted'); };
 };
 
-async function open(t, { width = 375, height = 800, scheme = 'light', geo = PREF_OFFICE, query = '?sim=tsunami', init = null } = {}) {
+// Fake Geolocation that also reports a GPS course (Playwright's own
+// geolocation emulation has no heading/speed). window.__fakeGeo controls it:
+// { latitude, longitude, accuracy, heading, speed, ageMs }.
+const FAKE_GEO = (g) => {
+  window.__fakeGeo = g;
+  const emit = (ok) => {
+    const f = window.__fakeGeo;
+    ok({
+      timestamp: Date.now() - (f.ageMs || 0),
+      coords: {
+        latitude: f.latitude, longitude: f.longitude, accuracy: f.accuracy,
+        altitude: null, altitudeAccuracy: null, heading: f.heading ?? null, speed: f.speed ?? null,
+      },
+    });
+  };
+  const geo = {
+    getCurrentPosition(ok) { setTimeout(() => emit(ok), 10); },
+    watchPosition(ok) { emit(ok); return setInterval(() => emit(ok), 300); },
+    clearWatch(id) { clearInterval(id); },
+  };
+  Object.defineProperty(Navigator.prototype, 'geolocation', { get: () => geo, configurable: true });
+};
+
+// Declination at the prefectural office from the GSI 2020.0 approximation,
+// worked out by hand and written as a literal so the test does not reuse the
+// module's code: dphi = -2.0231, dlambda = 0.3831 ->
+// 495.822 - 37.350 - 2.960 + 0.029 + 0.005 - 0.096 = 455.45' = 7.59 deg.
+const DECL_PREF_OFFICE = 7.59;
+
+async function open(t, { width = 375, height = 800, scheme = 'light', geo = PREF_OFFICE, query = '?sim=tsunami', init = null, fakeGeo = null } = {}) {
   const ctx = await browser.newContext({
     viewport: { width, height },
     colorScheme: scheme,
@@ -65,6 +94,7 @@ async function open(t, { width = 375, height = 800, scheme = 'light', geo = PREF
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   if (init) await page.addInitScript(init);
+  if (fakeGeo) await page.addInitScript(FAKE_GEO, fakeGeo);
   await page.goto(`${base}/app/${query}`);
   await page.waitForFunction(() => globalThis.__evac);
   return { page, requests, errors };
@@ -172,32 +202,90 @@ test('tsunami mock, no compass: text + north-up figure, never an arrow', { skip 
   await shot(page, 'evac-text-375-light');
 });
 
-test('Android-like (deviceorientationabsolute): arrow = bearing - (360 - alpha - declination)', { skip }, async (t) => {
-  const { page, errors } = await open(t);
+test('Android-like, standing still: no compass accuracy -> no arrow, says why', { skip }, async (t) => {
+  const { page } = await open(t);
   assert.equal(await page.evaluate(() => 'ondeviceorientationabsolute' in window), true);
   await start(page);
   await fireAbsolute(page, 90);
   const s = await state(page);
-  assert.equal(s.mode, 'arrow');
+  assert.equal(s.result.value.heading.basis, 'absolute_orientation');
+  assert.equal(s.figure, 'north-up');
+  assert.match(s.text, /方位の精度が分からないため、矢印を出していません/);
+});
+
+test('Android-like, walking with the course matching the compass: arrow = bearing - heading', { skip }, async (t) => {
+  // alpha 90 -> top edge to magnetic 270 -> true about 262.6. GPS course 262 at 1.5 m/s.
+  const { page, errors } = await open(t, { fakeGeo: { ...PREF_OFFICE, heading: 262, speed: 1.5 } });
+  await start(page);
+  await fireAbsolute(page, 90);
+  const s = await state(page);
+  assert.equal(s.mode, 'arrow', s.text);
   assert.equal(s.figure, 'arrow');
   const v = s.result.value;
-  assert.equal(v.heading.basis, 'absolute_orientation');
-  const expectedHeading = (360 - 90 - v.declination_west_deg + 360) % 360;
+  const expectedHeading = 270 - DECL_PREF_OFFICE;
   assert.ok(Math.abs(v.heading.true_heading_deg - expectedHeading) < 0.2, `${v.heading.true_heading_deg} vs ${expectedHeading}`);
   const c = v.candidates[0];
-  const expectedArrow = (c.bearing_deg - expectedHeading + 720) % 360;
+  // Portrait, tilted back by beta = 20 deg: seen from above, the screen's
+  // up-down direction is shortened by cos(beta), so the drawn angle theta
+  // satisfies tan(theta) = tan(d) * cos(beta), d = bearing - heading.
+  const d = ((c.bearing_deg - expectedHeading) * Math.PI) / 180;
+  const b20 = (20 * Math.PI) / 180;
+  const expectedArrow = ((Math.atan2(Math.sin(d) * Math.cos(b20), Math.cos(d)) * 180) / Math.PI + 360) % 360;
   assert.ok(Math.abs(c.arrow_deg - expectedArrow) < 0.3, `${c.arrow_deg} vs ${expectedArrow}`);
   assert.equal(s.deg, c.arrow_deg);
-  const label = await page.getAttribute('.evac-arrow-svg', 'aria-label');
-  assert.match(label, /画面の上/);
+  assert.match(await page.getAttribute('.evac-arrow-svg', 'aria-label'), /画面の上/);
+  assert.match(s.text, /いま進んでいる方向（GPS）/);
   assert.deepEqual(errors.filter((e) => /evac/.test(e)), []);
   await shot(page, 'evac-arrow-android-375-light');
 
-  // events stop -> the arrow disappears (stale), text remains
+  // orientation events stop -> the arrow disappears (stale), text remains
   await page.waitForTimeout(2600);
   const s2 = await state(page);
   assert.equal(s2.figure, 'north-up');
   assert.match(s2.text, /矢印を出していません/);
+});
+
+test('Android-like, walking against the compass: mismatch -> no arrow', { skip }, async (t) => {
+  const { page } = await open(t, { fakeGeo: { ...PREF_OFFICE, heading: 80, speed: 1.5 } });
+  await start(page);
+  await fireAbsolute(page, 90);
+  const s = await state(page);
+  assert.equal(s.figure, 'north-up');
+  assert.match(s.text, /食い違って/);
+});
+
+test('old position (20 s): no arrow, the age is shown', { skip }, async (t) => {
+  const { page } = await open(t, { init: IPHONE_INIT, fakeGeo: { ...PREF_OFFICE, ageMs: 20000 } });
+  await start(page);
+  await fireIphone(page, 180, 10);
+  const s = await state(page);
+  assert.equal(s.figure, 'north-up');
+  assert.match(s.text, /約 2\d 秒前に取ったもの/);
+});
+
+test('landscape screen: no arrow until the sign is checked on devices', { skip }, async (t) => {
+  const LANDSCAPE = () => {
+    Object.defineProperty(ScreenOrientation.prototype, 'angle', { get: () => 90, configurable: true });
+  };
+  const { page } = await open(t, { init: LANDSCAPE });
+  assert.equal(await page.evaluate(() => screen.orientation.angle), 90);
+  await start(page);
+  await fireAbsolute(page, 90);
+  const s = await state(page);
+  assert.equal(s.figure, 'north-up');
+  assert.match(s.text, /縦向きで持って/);
+});
+
+test('simulated lift: the direction display stops and says so', { skip }, async (t) => {
+  const { page } = await open(t);
+  await start(page);
+  assert.equal((await state(page)).result.status, 'ok');
+  await page.evaluate(() => globalThis.dispatchEvent(new CustomEvent('app:simulated-lift', { detail: { key: 'tsunami_warning' } })));
+  await page.waitForTimeout(400);
+  const s = await state(page);
+  assert.equal(s.figure, 'none');
+  assert.match(s.text, /解除を受けたため、方向の表示をやめました/);
+  assert.equal(await page.isVisible('#evac-name'), false);
 });
 
 test('Android-like: jittery compass hides the arrow', { skip }, async (t) => {
@@ -233,8 +321,8 @@ test('iPhone-like (webkitCompassHeading): permission asked on the button, arrow 
   assert.equal(s.mode, 'arrow');
   const v = s.result.value;
   assert.equal(v.heading.basis, 'ios_compass');
-  const expectedHeading = (180 - v.declination_west_deg + 360) % 360;
-  assert.ok(Math.abs(v.heading.true_heading_deg - expectedHeading) < 0.2);
+  const expectedHeading = 180 - DECL_PREF_OFFICE;
+  assert.ok(Math.abs(v.heading.true_heading_deg - expectedHeading) < 0.2, `${v.heading.true_heading_deg} vs ${expectedHeading}`);
   await shot(page, 'evac-arrow-iphone-375-light');
 });
 
@@ -254,8 +342,10 @@ test('"通れない": excludes the direction, shows it, and can be undone', { sk
   await page.click('#evac-exclude');
   await page.waitForTimeout(400);
   const s = await state(page);
-  const after = s.result.status === 'ok' ? s.result.value.candidates[0] : null;
-  assert.notEqual(after?.id, before.id);
+  assert.equal(s.result.status, 'ok');
+  const after = s.result.value.candidates[0];
+  assert.notEqual(after.id, before.id);
+  assert.ok(!s.result.value.candidates.some((c) => c.id === before.id));
   assert.match(s.text, /除外中：北から約 \d+ 度/);
   assert.match(s.text, /まで）/);
   assert.match(s.text, /あなたの判断です/);
