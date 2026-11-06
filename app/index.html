@@ -10,7 +10,69 @@
 <body>
 <div id="sim-banner" class="banner" hidden>模擬データを含みます。気象庁の発表ではありません。</div>
 
-<main>
+<nav class="view-switch" aria-label="表示の切り替え">
+  <button id="tab-evac" type="button" aria-pressed="true">避難者</button>
+  <button id="tab-support" type="button" aria-pressed="false">支援者</button>
+</nav>
+
+<!-- Evacuee view (default). Text and buttons only; no input fields. -->
+<main id="view-evac" class="evac" data-mode="message">
+  <p class="evac-official">公的な発表と指示を優先してください。</p>
+  <p id="evac-instruction" class="evac-instruction" hidden></p>
+  <p id="evac-instruction-origin" class="note" hidden></p>
+  <p id="evac-shock" class="evac-shock" role="status" hidden><span id="evac-shock-text"></span></p>
+
+  <section class="evac-main" aria-labelledby="evac-name">
+    <div id="evac-figure" class="evac-figure" data-kind="none"></div>
+    <p id="evac-figure-caption" class="note" hidden></p>
+    <p id="evac-name" class="evac-name" hidden></p>
+    <p id="evac-muni" class="evac-muni" hidden></p>
+    <p id="evac-distance" class="evac-distance" hidden></p>
+    <p id="evac-direction" class="evac-direction" hidden></p>
+    <p id="evac-arrow-reason" class="evac-reason" hidden></p>
+    <p id="evac-course" class="evac-course" hidden></p>
+    <p id="evac-position-age" class="evac-reason" hidden></p>
+    <p id="evac-message" class="evac-message" hidden></p>
+    <p class="evac-straight"><strong>直線の方向です。道順ではありません。</strong></p>
+    <p id="evac-hazards" class="note" hidden></p>
+    <p id="evac-remarks" class="evac-remarks" hidden></p>
+  </section>
+
+  <button id="evac-exclude" class="evac-big" type="button" disabled>この方向は通れない</button>
+  <div id="evac-exclusions-wrap" hidden>
+    <ul id="evac-exclusions" class="lines"></ul>
+    <p class="note">通れるかどうかは、あなたの判断です。この画面は道の状態を調べていません。</p>
+  </div>
+
+  <button id="evac-start" class="evac-big evac-start" type="button">位置と方位を使う</button>
+  <p id="evac-perm" class="note"></p>
+
+  <p id="evac-reception" class="evac-reception"></p>
+
+  <div id="evac-others-wrap" hidden>
+    <p class="sub">ほかの候補（近い順）</p>
+    <ul id="evac-others" class="lines"></ul>
+  </div>
+
+  <div id="evac-fallback" hidden>
+    <p class="sub">確かめる先</p>
+    <p class="note">市町村の発表とハザードマップを確かめてください。</p>
+    <ul id="evac-fallback-list" class="lines"></ul>
+  </div>
+
+  <details class="evac-about">
+    <summary>このデータについて</summary>
+    <p id="evac-coverage" class="note">市町村が登録し、公開に同意した指定緊急避難場所だけが含まれます。載っていない場所がありえます。</p>
+    <p class="note">国土地理院の「ご利用上の注意」：</p>
+    <ol id="evac-notices" class="lines note"></ol>
+    <p id="evac-data-updated" class="note"></p>
+    <p id="evac-attribution" class="note"></p>
+    <p class="note">位置はこの画面の中だけで使い、端末の外に送りません。</p>
+  </details>
+</main>
+
+<!-- Supporter view: the existing prototype screen, unchanged. -->
+<main id="view-support" hidden>
 <!-- 1. BW-S2 -->
 <section id="sec-official" class="official" aria-labelledby="h-official">
   <h1 id="h-official">公的な発表を優先してください</h1>
@@ -107,6 +169,7 @@
 </section>
 </main>
 
+<script type="module" src="./evac/evac-main.js"></script>
 <script type="module" src="./main.js"></script>
 </body>
 </html>
