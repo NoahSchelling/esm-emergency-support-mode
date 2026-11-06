@@ -1,0 +1,9 @@
+{
+  "name": "bw-evac",
+  "private": true,
+  "type": "module",
+  "description": "On-device straight-line direction to designated emergency evacuation sites (Shizuoka only)",
+  "scripts": {
+    "test": "node --test 'test/*.test.js'"
+  }
+}

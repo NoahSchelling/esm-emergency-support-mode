@@ -1,0 +1,248 @@
+// Tests for bearings, declination and device heading.
+// Run: node --test 'modules/evac/test/*.test.js'
+// Positions are fictional round-number points or approximate positions of
+// public buildings. No personal locations.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  norm360, angleDiff, bearingDeg, distanceM, compassName, declinationWestDeg, magneticToTrue,
+  headingFromSample, sampleFromEvent, screenAngleFrom, tiltDeg, createHeadingTracker, circularStats,
+  courseFrom, BASIS,
+} from '../index.js';
+import { startOrientation, currentScreenAngle, requestOrientationPermission } from '../browser/orientation.js';
+
+const close = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg ?? ''} expected ${b} got ${a}`);
+// Fictional round-number point.
+const P = [35.0, 138.0];
+
+test('bearing: north, east, south, west', () => {
+  close(bearingDeg(...P, 35.01, 138.0), 0, 1e-9, 'N');
+  close(bearingDeg(...P, 35.0, 138.01), 90, 0.01, 'E');
+  close(bearingDeg(...P, 34.99, 138.0), 180, 1e-9, 'S');
+  close(bearingDeg(...P, 35.0, 137.99), 270, 0.01, 'W');
+  close(bearingDeg(...P, 35.01, 138.0122), 45, 0.5, 'NE');
+  // just west of north: must be close to 360, reported in [0, 360)
+  const b = bearingDeg(...P, 35.01, 137.9999);
+  assert.ok(b > 359 && b < 360, String(b));
+});
+
+test('distance: 0.01 degree of latitude is about 1.11 km', () => {
+  close(distanceM(...P, 35.01, 138.0), 1111.95, 1);
+  assert.equal(distanceM(...P, ...P), 0);
+});
+
+test('angles: 0/360 boundary', () => {
+  assert.equal(norm360(360), 0);
+  assert.equal(norm360(720), 0);
+  assert.equal(norm360(-90), 270);
+  assert.equal(Object.is(norm360(-0), 0), true);
+  close(norm360(-0.5), 359.5, 1e-9);
+  assert.equal(angleDiff(359, 1), -2);
+  assert.equal(angleDiff(1, 359), 2);
+  assert.equal(angleDiff(180, 0), 180);
+  assert.equal(angleDiff(0, 180), 180);
+  assert.equal(compassName(359), '北');
+  assert.equal(compassName(11.2), '北');
+  assert.equal(compassName(11.3), '北北東');
+  assert.equal(compassName(180), '南');
+  assert.equal(compassName(270), '西');
+});
+
+test('declination: reproduces the GSI worked example (Tokyo, 7°36.5\' west)', () => {
+  // Example on the GSI page: φ = 35.68, λ = 139.70 -> 7°36.5'
+  close(declinationWestDeg(35.68, 139.70), 7 + 36.5 / 60, 0.01);
+  // Shizuoka prefectural office (approximate position): about 7.4 deg west
+  const d = declinationWestDeg(34.9769, 138.3831);
+  assert.ok(d > 7 && d < 8, String(d));
+  assert.equal(declinationWestDeg(0, 0), null);
+  assert.equal(declinationWestDeg(NaN, 138), null);
+});
+
+test('declination: magnetic -> true subtracts a west declination', () => {
+  close(magneticToTrue(0, 7.5), 352.5, 1e-9);
+  close(magneticToTrue(90, 7.5), 82.5, 1e-9);
+  close(magneticToTrue(5, 7.5), 357.5, 1e-9);
+});
+
+const NOW = 1_000_000;
+const CTX = { nowMs: NOW, screenAngleDeg: 0, declinationWestDeg: 7.5 };
+const ios = (h, acc = 10, extra = {}) => ({ type: 'deviceorientation', alpha: 10, beta: 20, gamma: 0, absolute: false, webkit_heading: h, webkit_accuracy: acc, at_ms: NOW, ...extra });
+const abs = (alpha, extra = {}) => ({ type: 'deviceorientationabsolute', alpha, beta: 20, gamma: 0, absolute: true, webkit_heading: null, webkit_accuracy: null, at_ms: NOW, ...extra });
+
+test('heading: iOS webkitCompassHeading, corrected to true north', () => {
+  const r = headingFromSample(ios(90), CTX);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.value.basis, BASIS.IOS);
+  close(r.value.true_heading_deg, 82.5, 1e-9);
+  close(headingFromSample(ios(0), CTX).value.true_heading_deg, 352.5, 1e-9);
+  close(headingFromSample(ios(359), CTX).value.true_heading_deg, 351.5, 1e-9);
+});
+
+test('heading: iOS bad or unknown accuracy refuses', () => {
+  assert.equal(headingFromSample(ios(90, -1), CTX).status, 'unknown');
+  assert.match(headingFromSample(ios(90, -1), CTX).detail, /校正/);
+  assert.equal(headingFromSample(ios(90, null), CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90, 35), CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90, 20), CTX).status, 'ok');
+});
+
+test('heading: Android deviceorientationabsolute alpha (counter-clockwise)', () => {
+  // alpha 0: top points (magnetic) north
+  close(headingFromSample(abs(0), CTX).value.true_heading_deg, 352.5, 1e-9);
+  // alpha 90: device turned 90 deg counter-clockwise -> top points west
+  close(headingFromSample(abs(90), CTX).value.true_heading_deg, 262.5, 1e-9);
+  close(headingFromSample(abs(270), CTX).value.true_heading_deg, 82.5, 1e-9);
+  assert.equal(headingFromSample(abs(90), CTX).value.basis, BASIS.ABSOLUTE);
+  // absolute=true on a plain deviceorientation event is accepted too
+  assert.equal(headingFromSample(abs(0, { type: 'deviceorientation' }), CTX).status, 'ok');
+});
+
+test('heading: a relative deviceorientation (not north-referenced) is never used', () => {
+  const rel = { type: 'deviceorientation', alpha: 0, beta: 20, gamma: 0, absolute: false, webkit_heading: null, webkit_accuracy: null, at_ms: NOW };
+  const r = headingFromSample(rel, CTX);
+  assert.equal(r.status, 'unsupported');
+  assert.equal(r.value, null);
+});
+
+test('heading: stale, missing, tilted, unknown screen angle, unknown declination', () => {
+  assert.equal(headingFromSample(null, CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90, 10, { at_ms: NOW - 2001 }), CTX).status, 'stale');
+  assert.equal(headingFromSample(ios(90, 10, { beta: 70 }), CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90, 10, { beta: 0, gamma: 65 }), CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90, 10, { beta: 179 }), CTX).status, 'unknown'); // face down
+  assert.equal(headingFromSample(ios(90, 10, { beta: null }), CTX).status, 'unknown');
+  assert.equal(headingFromSample(ios(90), { ...CTX, screenAngleDeg: null }).status, 'unknown');
+  assert.equal(headingFromSample(ios(90), { ...CTX, declinationWestDeg: null }).status, 'unknown');
+  close(tiltDeg(0, 0), 0, 1e-9);
+  close(tiltDeg(60, 0), 60, 1e-9);
+});
+
+test('heading: screen rotation adds the screen angle (landscape)', () => {
+  // Device top points magnetic north; rotated so screen-up is the device's right edge.
+  close(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 90 }).value.true_heading_deg, 82.5, 1e-9);
+  close(headingFromSample(ios(0), { ...CTX, screenAngleDeg: 270 }).value.true_heading_deg, 262.5, 1e-9);
+  close(headingFromSample(abs(90), { ...CTX, screenAngleDeg: 90 }).value.true_heading_deg, 352.5, 1e-9);
+  close(headingFromSample(ios(300), { ...CTX, screenAngleDeg: 180 }).value.true_heading_deg, 112.5, 1e-9);
+});
+
+test('screen angle: APIs, legacy -90, odd values, portrait hint', () => {
+  assert.equal(screenAngleFrom({ orientationAngle: 90 }), 90);
+  assert.equal(screenAngleFrom({ windowOrientation: -90 }), 270);
+  assert.equal(screenAngleFrom({ orientationAngle: 0, windowOrientation: 90 }), 0);
+  assert.equal(screenAngleFrom({ orientationAngle: 45 }), null);
+  assert.equal(screenAngleFrom({ portraitHint: true }), 0);
+  assert.equal(screenAngleFrom({ portraitHint: false }), null);
+  assert.equal(screenAngleFrom({}), null);
+  assert.equal(currentScreenAngle({ screen: { orientation: { angle: 270 } } }), 270);
+  assert.equal(currentScreenAngle({ orientation: -90 }), 270);
+  assert.equal(currentScreenAngle({ innerWidth: 800, innerHeight: 400 }), null);
+});
+
+test('tracker: stable samples give the circular mean; boundary 358/0/2 stays near 0', () => {
+  const t = createHeadingTracker();
+  for (const [h, dt] of [[357.5, 300], [359.5, 200], [1.5, 100], [359.5, 0]]) t.push(ios(h, 10, { at_ms: NOW - dt }));
+  const r = t.read(CTX);
+  assert.equal(r.status, 'ok');
+  // magnetic ~359.5 -> true ~352
+  close(r.value.true_heading_deg, 352, 1);
+  assert.ok(r.value.spread_deg < 5);
+  const st = circularStats([358, 0, 2]);
+  close(st.mean > 180 ? st.mean - 360 : st.mean, 0, 1e-9);
+});
+
+test('tracker: jittery, too few, or a bad latest sample refuses', () => {
+  const t = createHeadingTracker();
+  t.push(ios(0, 10, { at_ms: NOW - 200 }));
+  t.push(ios(40, 10, { at_ms: NOW - 100 }));
+  t.push(ios(0, 10, { at_ms: NOW }));
+  assert.equal(t.read(CTX).status, 'unknown');
+  assert.match(t.read(CTX).detail, /安定していません/);
+
+  const few = createHeadingTracker();
+  few.push(ios(90));
+  assert.equal(few.read(CTX).status, 'unknown');
+
+  const bad = createHeadingTracker();
+  for (const dt of [300, 200, 100]) bad.push(ios(90, 10, { at_ms: NOW - dt }));
+  bad.push(ios(90, -1));
+  assert.equal(bad.read(CTX).status, 'unknown');
+
+  const old = createHeadingTracker();
+  for (const dt of [5000, 4000, 3000]) old.push(ios(90, 10, { at_ms: NOW - dt }));
+  assert.equal(old.read(CTX).status, 'stale');
+});
+
+test('GPS course: used only when moving fast enough and fresh', () => {
+  assert.equal(courseFrom(null, NOW).usable, false);
+  assert.equal(courseFrom({ heading_deg: 90, speed_mps: 0.3, at_ms: NOW }, NOW).usable, false);
+  assert.match(courseFrom({ heading_deg: 90, speed_mps: 0, at_ms: NOW }, NOW).reason, /止まっている/);
+  assert.equal(courseFrom({ heading_deg: null, speed_mps: 3, at_ms: NOW }, NOW).usable, false);
+  assert.equal(courseFrom({ heading_deg: 90, speed_mps: 3, at_ms: NOW - 60000 }, NOW).usable, false);
+  const c = courseFrom({ heading_deg: 450, speed_mps: 1.5, at_ms: NOW }, NOW);
+  assert.equal(c.usable, true);
+  assert.equal(c.heading_deg, 90);
+});
+
+test('sampleFromEvent copies only numbers', () => {
+  const s = sampleFromEvent({ type: 'deviceorientation', alpha: 1, beta: 'x', gamma: null, webkitCompassHeading: 12, webkitCompassAccuracy: 5 }, { atMs: 5 });
+  assert.deepEqual({ ...s }, { type: 'deviceorientation', alpha: 1, beta: null, gamma: null, absolute: false, webkit_heading: 12, webkit_accuracy: 5, at_ms: 5 });
+});
+
+function fakeWindow({ absolute }) {
+  const w = new EventTarget();
+  if (absolute) w.ondeviceorientationabsolute = null;
+  return w;
+}
+function fire(w, type, props) {
+  w.dispatchEvent(Object.assign(new Event(type), props));
+}
+
+test('browser wiring: on Android-like browsers the relative stream is ignored', () => {
+  const w = fakeWindow({ absolute: true });
+  const t = createHeadingTracker();
+  let now = NOW - 300;
+  const h = startOrientation(t, { w, now: () => now });
+  for (let i = 0; i < 3; i++) {
+    fire(w, 'deviceorientationabsolute', { alpha: 90, beta: 20, gamma: 0, absolute: true });
+    fire(w, 'deviceorientation', { alpha: 0, beta: 20, gamma: 0, absolute: false });
+    now += 100;
+  }
+  const r = t.read({ ...CTX, nowMs: now });
+  assert.equal(r.status, 'ok');
+  close(r.value.true_heading_deg, 262.5, 1e-6);
+  assert.equal(h.lastEventType, 'deviceorientationabsolute');
+  h.stop();
+  fire(w, 'deviceorientationabsolute', { alpha: 0, beta: 20, gamma: 0, absolute: true });
+  assert.equal(t.size, 3);
+});
+
+test('browser wiring: iPhone-like events with webkitCompassHeading', () => {
+  const w = fakeWindow({ absolute: false });
+  const t = createHeadingTracker();
+  let now = NOW - 300;
+  startOrientation(t, { w, now: () => now });
+  for (let i = 0; i < 3; i++) {
+    fire(w, 'deviceorientation', { alpha: 123, beta: 20, gamma: 0, absolute: false, webkitCompassHeading: 180, webkitCompassAccuracy: 10 });
+    now += 100;
+  }
+  close(t.read({ ...CTX, nowMs: now }).value.true_heading_deg, 172.5, 1e-6);
+});
+
+test('browser wiring: relative-only browsers give "unsupported", not an arrow', () => {
+  const w = fakeWindow({ absolute: false });
+  const t = createHeadingTracker();
+  startOrientation(t, { w, now: () => NOW });
+  fire(w, 'deviceorientation', { alpha: 0, beta: 20, gamma: 0, absolute: false });
+  assert.equal(t.read(CTX).status, 'unsupported');
+});
+
+test('permission: iOS-style requestPermission is called synchronously', async () => {
+  let called = false;
+  const w = { DeviceOrientationEvent: { requestPermission() { called = true; return Promise.resolve('granted'); } } };
+  const p = requestOrientationPermission(w);
+  assert.equal(called, true); // before any await
+  assert.equal(await p, 'granted');
+  assert.equal(await requestOrientationPermission({ DeviceOrientationEvent: function E() {} }), 'not_required');
+  assert.equal(await requestOrientationPermission({}), 'unsupported');
+  assert.equal(await requestOrientationPermission({ DeviceOrientationEvent: { requestPermission: () => Promise.resolve('denied') } }), 'denied');
+});
