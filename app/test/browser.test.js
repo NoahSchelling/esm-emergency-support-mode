@@ -1,5 +1,6 @@
-// Browser checks with Playwright (Chromium). Skipped when Playwright is not
-// installed. Set APP_SCREENSHOT_DIR to save screenshots (outside the repo).
+// Browser checks of the supporter view with Playwright (Chromium). Skipped
+// when Playwright is not installed. Set APP_SCREENSHOT_DIR to save
+// screenshots (outside the repo).
 //
 // Positions are a public facility (Shizuoka Prefectural Office, approximate)
 // and a fictional round-number grid point.
@@ -20,6 +21,9 @@ try {
 }
 const skip = playwright ? false : 'playwright is not available';
 const SHOTS = process.env.APP_SCREENSHOT_DIR || null;
+// PW_CHANNEL=chrome (or msedge) uses an installed browser instead of the
+// Chromium bundled with Playwright.
+const CHANNEL = process.env.PW_CHANNEL || undefined;
 
 const PREF_OFFICE = { latitude: 34.9769, longitude: 138.3831, accuracy: 20 };
 const FICTIONAL = { latitude: 35.0, longitude: 135.0, accuracy: 30 };
@@ -50,7 +54,7 @@ before(async () => {
   const withCa = await listen(createAppServer({ ca: `http://127.0.0.1:${caPort}` }));
   caBase = `http://127.0.0.1:${withCa}`;
   globalThis.__base = `http://127.0.0.1:${noCa}`;
-  browser = await playwright.chromium.launch();
+  browser = await playwright.chromium.launch(CHANNEL ? { channel: CHANNEL } : {});
 });
 
 after(async () => {
@@ -64,7 +68,13 @@ async function open(url, opts = {}) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(url);
-  await page.waitForFunction(() => globalThis.__app);
+  // Wait for both scripts: evac-main.js shows the evacuee view when it loads,
+  // so switching earlier could be undone.
+  await page.waitForFunction(() => globalThis.__app && globalThis.__evac);
+  // The evacuee view is the default; these checks are for the supporter view.
+  await page.click('#tab-support');
+  assert.equal(await page.isVisible('#view-support'), true);
+  assert.equal(await page.isVisible('#view-evac'), false);
   return { context, page, errors };
 }
 
@@ -159,7 +169,10 @@ test('motion: permission button, dispatched events, then stale', { skip }, async
         interval: 16,
       }));
     }
-    window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 90, beta: 10, gamma: -3, absolute: false }));
+    // main.js listens to "deviceorientationabsolute" when the browser has it
+    // (Chrome), and to "deviceorientation" otherwise.
+    const absolute = 'ondeviceorientationabsolute' in globalThis;
+    window.dispatchEvent(new DeviceOrientationEvent(absolute ? 'deviceorientationabsolute' : 'deviceorientation', { alpha: 90, beta: 10, gamma: -3, absolute }));
   });
   await fire();
   await page.waitForFunction(() => document.querySelector('#sec-motion').dataset.status === 'ok');
