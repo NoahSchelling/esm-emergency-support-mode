@@ -15,6 +15,7 @@
 
 - 区域の判定（緯度・経度から、市町村と気象庁の警報・注意報の区域のコードを端末の中で引く。静岡県のみ）：[modules/area/README.md](modules/area/README.md)。区域を引くだけで、警報の有無は判定しません。「判定できない」は「安全」ではありません。
 - 緊急支援モードの状態機械（平常／警戒高め／緊急と、緊急の中の段階）：[modules/mode/README.md](modules/mode/README.md)。入力は公的な発表と利用者の申告だけで、独自の判断はしません。「平常」は「安全」という意味ではありません。規則どうしの衝突と未決事項は [docs/proto/mode.md](docs/proto/mode.md)。
+- 避難場所への直線の方向（国土地理院の指定緊急避難場所データから、災害の種別に対応した避難場所の近い順の候補と、直線距離・真北からの方位を端末の中で求める。静岡県のみ）：[modules/evac/README.md](modules/evac/README.md)。道順ではありません。安全かどうか、通れるかどうかは判断しません。データには市町村が登録し公開に同意した場所だけが含まれ、欠けがありえます。実機で確かめる点は [docs/proto/evac.md](docs/proto/evac.md)。
 
 ## 開発に参加する人へ
 
@@ -40,7 +41,9 @@ git config core.hooksPath .githooks
 | 暑さ指数（WBGT）の地点別予測値（1 件。加工なし） | 出典：環境省熱中症予防情報サイト（環境省）（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。提供期間が終わったあとの古いデータ。 |
 | 重ねるハザードマップの WMTS メタデータ（1 件。加工なし） | 出典：「ハザードマップポータルサイト」（取得元の URL は `data/samples/README.md`） | 調査用に `data/samples/` に保存している。 |
 | 予報区等 GIS データ（静岡県分。市町村等（気象警報等）・市町村等（地震津波関係）・府県予報区等）と、防災情報 XML の個別コード表 | 出典：気象庁ホームページ（<https://www.data.jma.go.jp/developer/gis.html>）。気象庁「予報区等GISデータ」を加工して作成（加工と編集の責任は本プロジェクト）。GIS データは国土地理院長の承認を得て作成されたもの（承認番号は `modules/area/data/SOURCE.md`） | `modules/area/data/shizuoka.json` に、切り出し・簡略化・座標の丸めをして保存している。手順と簡略化による誤判定の恐れは `modules/area/data/SOURCE.md`。 |
+| 指定緊急避難場所データ（静岡県分） | 出典：国土地理院ウェブサイト（指定緊急避難場所データ）<https://hinanmap.gsi.go.jp/index.html>。「指定緊急避難場所データ」（国土地理院）をもとに本プロジェクトが作成（加工と編集の責任は本プロジェクト。国土地理院が作成したものではありません）。市町村が登録し、公開に同意したものだけが含まれ、最新でない場合や載っていない場合があります | `modules/evac/data/shizuoka_evac.json` に、静岡県分の抽出・項目の選択・座標の丸めをして保存している。手順と国土地理院の「ご利用上の注意」は `modules/evac/data/SOURCE.md`、利用条件の調べは `docs/research/evac_sites.md`。 |
+| 偏角の近似式（2020.0 年値） | 国土地理院「近似式から求める」<https://vldb.gsi.go.jp/sokuchi/geomag/menu_04/index.html> | 式の係数だけを `modules/evac/geo.js` で使っている。 |
 
-気象庁のデータの利用条件は `docs/research/jma_data.md` の 4 章に、気象庁防災情報 XML 以外の公的な防災データの取得方法と利用条件は `docs/research/other_data.md` にまとめています。
+気象庁のデータの利用条件は `docs/research/jma_data.md` の 4 章に、気象庁防災情報 XML 以外の公的な防災データの取得方法と利用条件は `docs/research/other_data.md` に、指定緊急避難場所データは `docs/research/evac_sites.md` にまとめています。
 
 試作 C-A の模擬データは、プログラムが作る架空のデータで、外部から持ち込んだものではありません。センサーのモジュールの再生用データ（`modules/sensors/fixtures/`）も、スクリプトで作った架空のデータです。
