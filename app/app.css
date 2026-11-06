@@ -74,3 +74,51 @@ th:first-child, td:first-child { width: 30%; }
 td .detail { display: block; }
 details summary { cursor: pointer; margin: 6px 0; }
 a { color: inherit; }
+
+/* ---------------------------------------------------------------- view switch + evacuee view
+   Large text, one-hand buttons, no green (BW-S3). */
+:root { --arrow: #0b3d91; --accent-bg: #fff3d6; --accent-fg: #3d2600; }
+@media (prefers-color-scheme: dark) {
+  :root { --arrow: #9cc3ff; --accent-bg: #3d2a00; --accent-fg: #ffe9b8; }
+}
+.view-switch { display: flex; gap: 0; max-width: 760px; margin: 8px auto 0; padding: 0 16px; }
+.view-switch button {
+  flex: 1 1 50%; min-height: 52px; font-size: 1.1rem; font-weight: bold; border-radius: 0;
+}
+.view-switch button:first-child { border-radius: 8px 0 0 8px; }
+.view-switch button:last-child { border-radius: 0 8px 8px 0; }
+.view-switch button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+main.evac { font-size: 1.15rem; line-height: 1.55; }
+.evac p { margin: 6px 0; }
+.evac-official { font-weight: bold; border: 2px solid var(--official-border); border-radius: 6px; padding: 6px 10px; }
+.evac-instruction { font-size: 1.3rem; font-weight: bold; background: var(--accent-bg); color: var(--accent-fg); padding: 10px 12px; border-radius: 6px; }
+.evac-shock { font-size: 1.2rem; font-weight: bold; background: var(--stale-bg); color: var(--stale-fg); padding: 10px 12px; border-radius: 6px; }
+.evac-main { border-top: none; text-align: center; padding-top: 4px; }
+.evac-figure { display: flex; justify-content: center; }
+.evac-figure:empty { display: none; }
+.evac-arrow-svg, .evac-north-svg { width: min(68vw, 260px); height: auto; display: block; }
+.evac-arrow-shape { fill: var(--arrow); }
+.evac-ring { fill: none; stroke: var(--line); stroke-width: 3; }
+.evac-n { fill: var(--fg); font-size: 22px; font-weight: bold; }
+.evac-dir { fill: var(--muted); font-size: 16px; }
+.evac-bearing { stroke: var(--arrow); stroke-width: 6; stroke-linecap: round; }
+.evac-bearing-head { fill: var(--arrow); }
+.evac-center { fill: var(--fg); }
+.evac-name { font-size: 1.5rem; font-weight: bold; line-height: 1.35; }
+.evac-muni { color: var(--muted); }
+.evac-distance { font-size: 1.4rem; font-weight: bold; }
+.evac-direction { font-size: 1.25rem; font-weight: bold; }
+.evac-reason, .evac-course { font-size: 1rem; }
+.evac-message { font-size: 1.15rem; background: var(--none-bg); color: var(--none-fg); padding: 10px 12px; border-radius: 6px; text-align: left; }
+.evac-straight { font-size: 1.1rem; }
+.evac-remarks { font-weight: bold; }
+button.evac-big {
+  display: block; width: 100%; min-height: 64px; margin: 10px 0; font-size: 1.25rem; font-weight: bold;
+  border-width: 2px; border-color: var(--fg);
+}
+button.evac-big:disabled { opacity: 0.55; }
+button.evac-start { min-height: 56px; font-size: 1.1rem; font-weight: normal; }
+button.evac-undo { min-height: 48px; min-width: 96px; margin-left: 4px; }
+.evac-reception { font-size: 1rem; }
+.evac-about { font-size: 1rem; }

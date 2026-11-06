@@ -71,7 +71,12 @@ if (S) {
   const env = S.createDeviceEnv();
   sensors.location = S.createLocationSensor({ env });
   sensors.motion = S.createMotionSensor({ env });
-  sensors.orientation = S.createOrientationSensor({ env });
+  // Chrome on Android: plain "deviceorientation" is not referenced to north;
+  // "deviceorientationabsolute" is. Use it when the browser has it.
+  sensors.orientation = S.createOrientationSensor({
+    env,
+    eventName: 'ondeviceorientationabsolute' in globalThis ? 'deviceorientationabsolute' : 'deviceorientation',
+  });
   sensors.online = S.createOnlineSensor({ env });
   sensors.network = S.createNetworkSensor({ env });
   sensors.battery = S.createBatterySensor({ env });
@@ -258,6 +263,12 @@ async function pollAnnouncements() {
     else annOrigin = 'app-mock';
   }
   renderAnnouncements();
+  // Tell the evacuee view when public information was last received.
+  if (caLastOkMs !== null) {
+    globalThis.dispatchEvent(new CustomEvent('app:announcement', {
+      detail: { receivedMs: caLastOkMs, simulated: caStatus?.source?.mode !== 'live' },
+    }));
+  }
 }
 
 function currentAnnouncementResult() {
@@ -386,7 +397,13 @@ if (modeCtl) {
     b.type = 'button';
     b.dataset.sim = key;
     b.textContent = def.label;
-    b.addEventListener('click', () => { modeCtl.simulatePublic(key); markSimulated(); renderMode(); });
+    b.addEventListener('click', () => {
+      modeCtl.simulatePublic(key);
+      markSimulated();
+      renderMode();
+      // Tell the evacuee view (./evac/evac-main.js). It never switches views.
+      globalThis.dispatchEvent(new CustomEvent('app:simulated-public', { detail: { key } }));
+    });
     $('mode-sim').append(b);
   }
   const lift = document.createElement('button');
