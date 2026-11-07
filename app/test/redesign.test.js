@@ -243,3 +243,15 @@ test('sources: no innerHTML, no green, no dark theme in the redesigned files', a
   const menu = [...html.matchAll(/<details class="menu-item" id="[^"]+">\s*<summary>([^<]+)<\/summary>/g)].map((m) => m[1]);
   assert.deepEqual(menu, ['事前情報収集', '避難者／支援者の切り替え', 'これまでの情報履歴', '記録の出典', '公的機関のウェブサイトリンク', '公的機関の連絡先', '独自情報の情報取得URL', 'デモモード']);
 });
+
+test('Skill: frontmatter, one question at a time, no medical or mental-health advice, public contacts first', async () => {
+  const md = await readFile(new URL('../../skills/handoff-interview/SKILL.md', import.meta.url), 'utf8');
+  const fm = /^---\nname: ([a-z0-9-]+)\ndescription: (.+)\n---\n/.exec(md);
+  assert.ok(fm, 'frontmatter');
+  assert.equal(fm[1], 'handoff-interview');
+  assert.ok(fm[2].length <= 1024);
+  assert.match(md, /一度に一つだけ/);
+  assert.match(md, /してはいけないこと（医療・心の助言をしない）/);
+  for (const n of ['119', '#7119', '110', '118']) assert.ok(md.includes(n), n);
+  assert.match(md, /座標を聞き出そうとしないでください/);
+});

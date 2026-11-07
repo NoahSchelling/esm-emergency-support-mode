@@ -207,3 +207,10 @@ main, .view-switch { padding-left: 40px; padding-right: 40px; }
 .handoff-panel h2 { font-size: 1.2rem; }
 .handoff-text { display: block; width: 100%; font: inherit; font-size: 0.9rem; line-height: 1.5; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .handoff-storage { background: var(--none-bg); color: var(--none-fg); padding: 6px 8px; border-radius: 6px; }
+/* Keep the fixed top area small on phones: in a demo the demo strip already
+   says "simulated", so the generic banner is hidden; notices scroll inside
+   a capped area. */
+.top:has(#demo-strip:not([hidden])) #sim-banner { display: none; }
+.demo-strip { font-size: 0.9rem; padding-top: 4px; padding-bottom: 4px; }
+.notices { max-height: 30vh; overflow-y: auto; }
+.notice { font-size: 0.95rem; padding: 4px 8px; margin: 4px 0; }

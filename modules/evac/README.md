@@ -36,7 +36,7 @@
 ### Node.js
 
 ```js
-import { loadEvacData, computeEvacDirections } from './modules/evac/node.js';
+import { loadEvacData, computeEvacDirections, siteCoordinates } from './modules/evac/node.js';
 
 const data = await loadEvacData();
 const r = computeEvacDirections(data, {
@@ -45,6 +45,10 @@ const r = computeEvacDirections(data, {
 });
 // r.status === 'ok'
 // r.value.candidates[0] → { name, municipality, distance_m, distance_text, bearing_deg, direction_text, arrow_deg: null, ... }
+
+// 避難場所の公開された座標（地図アプリへのリンクと、避難場所の標高の取得に使う）。
+// 結果には座標を入れないので（距離・方位と合わせると位置が分かるため）、必要なときだけ id で引く。
+const site = siteCoordinates(data, r.value.candidates[0].id); // { latitude, longitude } または null
 ```
 
 ### ブラウザ
