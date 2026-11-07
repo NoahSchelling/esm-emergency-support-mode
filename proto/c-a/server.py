@@ -107,6 +107,48 @@ def parse_atom(data):
     return feed_updated, [x for x in entries if x["id"]]
 
 
+MAX_ITEMS = 400
+
+
+def parse_items(body):
+    """Per-area kinds from Body/.../Item (warnings, tsunami forecasts).
+
+    Each Item has Area (Name, Code) and one or more Kind (Name, Status),
+    either directly or under Category. The values are copied as they are;
+    nothing is judged here. The list of the enclosing Warning "type"
+    attribute is kept so the screen can pick the area level it needs.
+    """
+    out = []
+    if body is None:
+        return out
+    stack = [(body, None)]
+    while stack:
+        el, wtype = stack.pop(0)
+        for c in el:
+            name = local_name(c.tag)
+            if name == "Item":
+                area = child(c, "Area")
+                kinds = []
+                for k in c.iter():
+                    if local_name(k.tag) == "Kind":
+                        kn = child_text(k, "Name")
+                        if kn:
+                            kinds.append({"name": kn, "status": child_text(k, "Status")})
+                code = child_text(area, "Code") if area is not None else None
+                if code and kinds:
+                    out.append({
+                        "type": wtype,
+                        "area_code": code,
+                        "area_name": child_text(area, "Name"),
+                        "kinds": kinds[:10],
+                    })
+                    if len(out) >= MAX_ITEMS:
+                        return out
+            else:
+                stack.append((c, c.get("type") or wtype))
+    return out
+
+
 def parse_detail(data):
     """Pick a few fields out of one XML message.
 
@@ -134,6 +176,7 @@ def parse_detail(data):
             break
     areas = areas[:20]
     return {
+        "items": parse_items(child(root, "Body")),
         "status": child_text(control, "Status"),
         "title": child_text(head, "Title"),
         "report_datetime": parse_time_ms(child_text(head, "ReportDateTime")),

@@ -10,6 +10,55 @@
 <body>
 <div id="sim-banner" class="banner" hidden>模擬データを含みます。気象庁の発表ではありません。</div>
 
+<!-- Alert border (10 px). Colour and blinking come from ./shell/shell-main.js. -->
+<div id="alert-frame" class="alert-frame" data-level="unknown" data-blink="none" aria-hidden="true"></div>
+
+<header class="topbar">
+  <span class="topbar-title">緊急支援モード（試作）</span>
+  <button id="menu-button" class="menu-button" type="button" aria-expanded="false" aria-controls="menu-panel">メニュー</button>
+</header>
+<div id="menu-panel" class="menu-panel" hidden>
+  <p class="sub">モード</p>
+  <div class="menu-group" role="group" aria-label="モード">
+    <button type="button" data-mode-choice="live" aria-pressed="true">現在位置</button>
+    <button type="button" data-mode-choice="shizuoka" aria-pressed="false">デモ：静岡県（津波の模擬）</button>
+    <button type="button" data-mode-choice="fukushima" aria-pressed="false">デモ：福島県（2011年の記録）</button>
+    <button type="button" data-mode-choice="chiba" aria-pressed="false">デモ：千葉県（2019年の記録）</button>
+    <button type="button" data-mode-choice="tokyo" aria-pressed="false">デモ：東京都（2019年の記録）</button>
+  </div>
+  <p class="sub">表示の色</p>
+  <div class="menu-group" role="group" aria-label="表示の色">
+    <button type="button" data-theme-choice="auto" aria-pressed="true">端末に合わせる</button>
+    <button type="button" data-theme-choice="light" aria-pressed="false">ライト</button>
+    <button type="button" data-theme-choice="dark" aria-pressed="false">ダーク</button>
+  </div>
+  <p class="note">外枠の色：黄＝注意報、赤＝警報、紫＝危険警報。特別警報・大津波警報は紫でゆっくり点滅。津波警報の中で海岸線の近くにいるときは速く点滅します（海岸線からの距離はこのアプリの仮の基準です）。外枠に色がないことは、安全という意味ではありません。</p>
+</div>
+
+<section id="status-line" class="status-line" data-level="unknown" aria-live="polite">
+  <p><strong id="status-mode">現在位置</strong>　<span id="status-text">公的な発表を確かめています。</span></p>
+</section>
+
+<section id="demo-box" class="demo-box" hidden>
+  <p id="demo-banner" class="demo-banner"></p>
+  <p id="demo-place" class="note"></p>
+  <p id="demo-now" class="demo-now"></p>
+  <p id="demo-inEffect"></p>
+  <div id="demo-controls" class="buttons" hidden>
+    <button id="demo-pause" type="button">一時停止</button>
+    <button id="demo-restart" type="button">最初から</button>
+    <span id="demo-step" class="note"></span>
+  </div>
+  <details>
+    <summary>これまでの記録（新しい順）</summary>
+    <ol id="demo-log" class="lines"></ol>
+  </details>
+  <details id="demo-sources-wrap">
+    <summary>記録の出典</summary>
+    <ul id="demo-sources" class="lines note"></ul>
+  </details>
+</section>
+
 <nav class="view-switch" aria-label="表示の切り替え">
   <button id="tab-evac" type="button" aria-pressed="true">避難者</button>
   <button id="tab-support" type="button" aria-pressed="false">支援者</button>
@@ -169,6 +218,7 @@
 </section>
 </main>
 
+<script type="module" src="./shell/shell-main.js"></script>
 <script type="module" src="./evac/evac-main.js"></script>
 <script type="module" src="./main.js"></script>
 </body>

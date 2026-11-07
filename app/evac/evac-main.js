@@ -60,6 +60,19 @@ let lifted = null;
 let reception = scenario ? { receivedMs: Date.now(), simulated: true } : null;
 let simulated = Boolean(scenario);
 
+// From the shell (../shell/shell-main.js): current-location mode or a demo.
+// It decides the hazard (only from an official or replayed/simulated
+// tsunami warning) and, in demos, the fixed position.
+let context = null;
+function takeContext(d) {
+  const prevHazard = context?.def?.hazard ?? null;
+  context = d;
+  if ((d?.def?.hazard ?? null) !== prevHazard) exclusions = [];
+  if (d && Number.isFinite(d.receivedMs)) reception = { receivedMs: d.receivedMs, simulated: Boolean(d.simulated), label: d.label };
+  simulated = Boolean(scenario) || Boolean(d?.simulated);
+}
+globalThis.addEventListener('app:context', (ev) => takeContext(ev.detail ?? null));
+
 // From the supporter view (../main.js): simulated public announcements.
 globalThis.addEventListener('app:simulated-public', (ev) => {
   const sc = scenarioFromSimKey(ev.detail?.key);
@@ -91,6 +104,8 @@ globalThis.addEventListener('app:announcement', (ev) => {
 // ---------------------------------------------------------------- exclusions
 
 let exclusions = [];
+// A context sent before this module finished loading.
+if (globalThis.__appContext) takeContext(globalThis.__appContext);
 let current = null; // last computeEvacDirections result
 
 $('evac-exclude').addEventListener('click', () => {
@@ -167,9 +182,17 @@ function setText(id, t) {
 
 function render() {
   const now = Date.now();
-  const loc = locSensor ? locSensor.read() : null;
+  // A live context without an official hazard does not hide the built-in
+  // simulated scenario (?sim= or the supporter view's simulated buttons).
+  const ctx = context && (context.mode !== 'live' || context.def || !scenario) ? context : null;
+  // In a demo the position is the demo's fixed point (marked simulated).
+  const loc = ctx?.position
+    ? { status: 'ok', source: 'simulated', observed_at: new Date(now).toISOString(), detail: '',
+      value: { latitude: ctx.position.latitude, longitude: ctx.position.longitude, accuracy_m: ctx.position.accuracy, heading_deg: null, speed_mps: null } }
+    : locSensor ? locSensor.read() : null;
   current = null;
-  if (scenario && data && loc?.status === 'ok') {
+  const hazard = ctx ? ctx.def?.hazard ?? null : scenario ? SCENARIOS[scenario].hazard : null;
+  if (hazard && data && loc?.status === 'ok' && !(ctx && ctx.hasEvacData === false)) {
     const v = loc.value;
     const heading = tracker.read({
       nowMs: now,
@@ -183,7 +206,7 @@ function render() {
       latitude: v.latitude,
       longitude: v.longitude,
       accuracy: v.accuracy_m,
-      hazard: SCENARIOS[scenario].hazard,
+      hazard,
       heading,
       course,
       position_at_ms: fixAt,
@@ -193,7 +216,7 @@ function render() {
     }, { now });
   }
   exclusions = evacOk ? E.activeExclusions(exclusions, now) : [];
-  const m = evacViewModel({ scenario, lifted, location: loc, dataError, result: current, nowMs: now });
+  const m = evacViewModel({ scenario, lifted, context: ctx, location: loc, dataError, result: current, nowMs: now });
 
   $('view-evac').dataset.mode = m.mode;
   setText('evac-instruction', m.instruction);

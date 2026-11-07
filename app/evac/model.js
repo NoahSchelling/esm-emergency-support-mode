@@ -54,7 +54,7 @@ export function minutesAgoText(receivedMs, nowMs) {
 export function receptionLine(reception, nowMs) {
   const ago = reception ? minutesAgoText(reception.receivedMs, nowMs) : null;
   if (!ago) return '公的情報：受信していません（受信していないことは、新しい発表がないという意味ではありません）';
-  return `公的情報の受信：${ago}（${formatJstHm(reception.receivedMs)}）${reception.simulated ? '【模擬】' : ''}`;
+  return `公的情報の受信：${ago}（${formatJstHm(reception.receivedMs)}）${reception.simulated ? (reception.label || '【模擬】') : ''}`;
 }
 
 export const STRAIGHT_LINE_NOTE = '直線の方向です。道順ではありません。';
@@ -79,8 +79,10 @@ function courseRelText(rel) {
  * state: { scenario, location (sensor result or null), dataError (string|null),
  *          result (computeEvacDirections result or null), nowMs }
  */
-export function evacViewModel({ scenario = null, lifted = null, location = null, dataError = null, result = null, nowMs }) {
-  const sc = scenario ? SCENARIOS[scenario] : null;
+// `context` (from ../shell/shell-main.js) overrides the built-in scenario:
+// { def: { hazard, instruction, origin } | null, message, hasEvacData }.
+export function evacViewModel({ scenario = null, lifted = null, context = null, location = null, dataError = null, result = null, nowMs }) {
+  const sc = context ? context.def : scenario ? SCENARIOS[scenario] : null;
   const base = {
     instruction: sc ? sc.instruction : '',
     instructionOrigin: sc ? sc.origin : '',
@@ -102,6 +104,13 @@ export function evacViewModel({ scenario = null, lifted = null, location = null,
   };
   if (!sc && lifted && SCENARIOS[lifted]) {
     return { ...base, instruction: SCENARIOS[lifted].lifted, instructionOrigin: SCENARIOS[lifted].origin, message: SCENARIOS[lifted].lifted, showFallback: true };
+  }
+  if (context && (context.message || !sc)) {
+    return {
+      ...base,
+      message: context.message || '避難場所の方向を示す公的な発表（津波警報など）を受けていないため、避難場所を選んでいません。市町村の発表とハザードマップを確かめてください。',
+      showFallback: true,
+    };
   }
   if (!sc) {
     return {
