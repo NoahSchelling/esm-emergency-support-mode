@@ -168,3 +168,23 @@ test('inundation estimate takes priority over the distance to the coast', () => 
   assert.equal(none.level, 0);
   assert.equal(none.basis, null);
 });
+
+test('an observed tsunami height raises the border (never lowers it)', () => {
+  const coast = { region_code: '250', region_name: '福島県', distance_m: 3000 };
+  const items = [{ area_code: '250', area_name: '福島県', kinds: [{ name: '津波注意報', status: null }] }];
+  const base = alertState({ items, areaCodes: [], coast });
+  assert.equal(base.level, 2);
+  const up = alertState({ items, areaCodes: [], coast, observed: { level: 5, text: '333cm', place: '小名浜' } });
+  assert.equal(up.level, 5);
+  assert.equal(up.color, '#AA00AA');
+  assert.match(up.detail, /観測された津波の高さ（333cm、小名浜）/);
+  assert.ok(up.sources.some((x) => x.observed && /津波の観測 333cm/.test(x.name)));
+  // counts as a tsunami warning for the imminent state
+  const near = alertState({ items, areaCodes: [], coast: { ...coast, distance_m: 300 }, observed: { level: 3, text: '2m', place: 'A' } });
+  assert.equal(near.imminent, true);
+  // a lower observation does not lower the border
+  const big = [{ area_code: '250', area_name: '福島県', kinds: [{ name: '大津波警報', status: null }] }];
+  assert.equal(alertState({ items: big, areaCodes: [], coast, observed: { level: 2, text: '0.5m', place: 'A' } }).level, 5);
+  // no coast region: not used
+  assert.equal(alertState({ items, areaCodes: ['x'], coast: null, observed: { level: 5, text: '9m', place: 'A' } }).level, 0);
+});

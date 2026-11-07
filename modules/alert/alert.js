@@ -135,8 +135,16 @@ export function nearestCoast(coast, lat, lon, maxSearchM = 30000) {
  *        false (outside it, where the data covers the place), or null
  *        (unknown: no data or no consent). It takes priority over the
  *        distance to the coast.
+ * observed: the highest observed tsunami height published for the nearest
+ *        coast region, with the level of its height class (decided by the
+ *        caller), or null: { level, text, place }. Decided 2026-11-08 by the
+ *        project owner: the border uses the HIGHER of the announcements and
+ *        this observation. Once a tsunami has been observed there is still
+ *        time before it arrives, and the screen must not make anyone give up
+ *        evacuating. It only raises the level (never lowers it), and it
+ *        counts as a tsunami warning for the imminent state.
  */
-export function alertState({ items = [], areaCodes = [], coast = null, received = true, inundation = null }, opts = {}) {
+export function alertState({ items = [], areaCodes = [], coast = null, received = true, inundation = null, observed = null }, opts = {}) {
   const o = { ...ALERT_DEFAULTS, ...opts };
   if (!received) {
     return {
@@ -162,6 +170,18 @@ export function alertState({ items = [], areaCodes = [], coast = null, received 
       }
     }
   }
+  // A published tsunami observation for the nearest coast region raises the
+  // level when its height class is higher than the announcements.
+  let raisedBy = null;
+  if (coast && observed && Number.isInteger(observed.level) && observed.level > level) {
+    level = observed.level;
+    raisedBy = observed;
+    sources.push({ name: `津波の観測 ${observed.text}（${observed.place}）`, area_name: coast.region_name ?? null, level: observed.level, observed: true });
+  }
+  if (coast && observed && Number.isInteger(observed.level) && observed.level >= 3
+    && (!tsunamiWarning || observed.level > tsunamiWarning.level)) {
+    tsunamiWarning = { name: tsunamiWarning?.name ?? '津波の観測', level: Math.max(observed.level, tsunamiWarning?.level ?? 0) };
+  }
   // Imminent state, only during an official tsunami warning for the nearest
   // coast region. The inundation estimate decides first; the distance to the
   // coast is used only when the estimate is unknown.
@@ -177,10 +197,11 @@ export function alertState({ items = [], areaCodes = [], coast = null, received 
     }
   }
   const style = LEVEL_STYLE[level] ?? LEVEL_STYLE[0];
-  const announced = `この地域への発表：${[...new Set(sources.map((s) => s.name))].join('、')}。`;
+  const announced = `この地域への発表：${[...new Set(sources.filter((s) => !s.observed).map((s) => s.name))].join('、') || 'なし'}。`
+    + (raisedBy ? `観測された津波の高さ（${raisedBy.text}、${raisedBy.place}）が発表より高い区分のため、外枠はその色です。` : '');
   let detail;
   if (imminent && basis === 'inundation') {
-    detail = `${tsunamiWarning.name}が出ています。この位置は、国の津波浸水想定の区域の中です。公的な発表と指示を優先してください。`;
+    detail = `${tsunamiWarning.name}が出ています。この位置は、国の津波浸水想定の区域の中です。${raisedBy ? `観測された津波の高さ（${raisedBy.text}、${raisedBy.place}）で外枠を上げています。` : ''}公的な発表と指示を優先してください。`;
   } else if (imminent) {
     detail = `${tsunamiWarning.name}が出ている海岸線から約 ${Math.round(coast.distance_m / 10) * 10} m の位置です。${DISTANCE_GUIDE_NOTE}公的な発表と指示を優先してください。`;
   } else if (level === 0) {
