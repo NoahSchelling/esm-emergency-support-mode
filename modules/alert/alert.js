@@ -3,9 +3,12 @@
 //
 // BW-S1: the level comes from the NAME of the official kind (注意報 /
 // 警報 / 危険警報 / 特別警報 / 津波警報 ...) through a fixed table. Nothing
-// here predicts or judges a hazard. The only own threshold is the distance
-// to the coast used for the "imminent" state during an official tsunami
-// warning; it is a ！！仮の値！！ chosen by the project and documented.
+// here predicts or judges a hazard. The "imminent" state during an official
+// tsunami warning first uses the national tsunami inundation estimate (is
+// the point inside the estimated area?). Only when that is unknown (no data,
+// no consent to look it up) the distance to the coast is used as the app's
+// own rough guide; it is a ！！仮の値！！ and the screen says it is not an
+// official criterion.
 // BW-S3: "no announcement received" is never reported as level 0 / normal;
 // it is "unknown".
 //
@@ -21,6 +24,9 @@ const RAD = Math.PI / 180;
 export const ALERT_DEFAULTS = Object.freeze({
   imminentCoastDistanceM: 1000,
 });
+
+// Shown whenever the distance guide decided the imminent state.
+export const DISTANCE_GUIDE_NOTE = '海岸線からの距離は、このアプリの目安です。公的な基準ではありません。';
 
 // Border colours. Yellow / red / purple follow the JMA warning level
 // colours (level 2 / 3 / 4). JMA uses black for level 5; by the project's
@@ -125,8 +131,12 @@ export function nearestCoast(coast, lat, lon, maxSearchM = 30000) {
  *        prefecture, ...). Items for other areas are ignored.
  * coast: result of nearestCoast() (or null when unknown / far).
  * received: false when no announcement source is reachable -> unknown.
+ * inundation: true (inside the national tsunami inundation estimate),
+ *        false (outside it, where the data covers the place), or null
+ *        (unknown: no data or no consent). It takes priority over the
+ *        distance to the coast.
  */
-export function alertState({ items = [], areaCodes = [], coast = null, received = true }, opts = {}) {
+export function alertState({ items = [], areaCodes = [], coast = null, received = true, inundation = null }, opts = {}) {
   const o = { ...ALERT_DEFAULTS, ...opts };
   if (!received) {
     return {
@@ -152,19 +162,40 @@ export function alertState({ items = [], areaCodes = [], coast = null, received 
       }
     }
   }
-  // Distance-based state, only during an official tsunami warning for the
-  // nearest coast region. The higher of the two is used.
-  const imminent = Boolean(tsunamiWarning && coast && coast.distance_m <= o.imminentCoastDistanceM);
+  // Imminent state, only during an official tsunami warning for the nearest
+  // coast region. The inundation estimate decides first; the distance to the
+  // coast is used only when the estimate is unknown.
+  let basis = null;
+  let imminent = false;
+  if (tsunamiWarning && coast) {
+    if (inundation === true || inundation === false) {
+      basis = 'inundation';
+      imminent = inundation;
+    } else {
+      basis = 'distance';
+      imminent = coast.distance_m <= o.imminentCoastDistanceM;
+    }
+  }
   const style = LEVEL_STYLE[level] ?? LEVEL_STYLE[0];
-  const detail = imminent
-    ? `${tsunamiWarning.name}が出ている海岸線から約 ${Math.round(coast.distance_m / 10) * 10} m の位置です。公的な発表と指示を優先してください。`
-    : level === 0
-      ? '受け取っている範囲では、この地域への注意報・警報はありません。発表がないことは、安全という意味ではありません。'
-      : `この地域への発表：${[...new Set(sources.map((s) => s.name))].join('、')}。`;
+  const announced = `この地域への発表：${[...new Set(sources.map((s) => s.name))].join('、')}。`;
+  let detail;
+  if (imminent && basis === 'inundation') {
+    detail = `${tsunamiWarning.name}が出ています。この位置は、国の津波浸水想定の区域の中です。公的な発表と指示を優先してください。`;
+  } else if (imminent) {
+    detail = `${tsunamiWarning.name}が出ている海岸線から約 ${Math.round(coast.distance_m / 10) * 10} m の位置です。${DISTANCE_GUIDE_NOTE}公的な発表と指示を優先してください。`;
+  } else if (level === 0) {
+    detail = '受け取っている範囲では、この地域への注意報・警報はありません。発表がないことは、安全という意味ではありません。';
+  } else if (basis === 'distance') {
+    // No reassuring words when the border does not blink fast.
+    detail = `${announced}浸水想定の区域かどうかが分からないため、海岸線からの距離を使っています。${DISTANCE_GUIDE_NOTE}`;
+  } else {
+    detail = announced;
+  }
   return {
     status: 'ok',
     level,
     imminent,
+    basis,
     color: imminent ? (style.color ?? LEVEL_STYLE[3].color) : style.color,
     blink: imminent ? 'hard1s' : style.blink,
     detail,

@@ -133,3 +133,38 @@ test('nearest coast: demo points, prefectural office, outside the data', () => {
   assert.ok(office.distance_m > 4000 && office.distance_m < 5500);
   assert.equal(nearestCoast(coast, 35.0, 135.0), null); // fictional, far from every kept region
 });
+
+test('inundation estimate takes priority over the distance to the coast', () => {
+  const items = [{ area_code: '250', kinds: [{ name: '大津波警報' }] }];
+  const far = { distance_m: 1040, region_code: '250', region_name: '福島県' };
+  const near = { distance_m: 300, region_code: '250', region_name: '福島県' };
+  // Inside the estimated area: imminent even beyond 1000 m.
+  const inside = alertState({ items, coast: far, inundation: true });
+  assert.equal(inside.imminent, true);
+  assert.equal(inside.basis, 'inundation');
+  assert.equal(inside.blink, 'hard1s');
+  assert.match(inside.detail, /浸水想定の区域の中/);
+  // Outside the estimated area: not imminent even close to the coast; the
+  // level from the announcement stays, and no reassuring words.
+  const outside = alertState({ items, coast: near, inundation: false });
+  assert.equal(outside.imminent, false);
+  assert.equal(outside.basis, 'inundation');
+  assert.equal(outside.level, 5);
+  assert.equal(outside.blink, 'fade3s');
+  assert.doesNotMatch(outside.detail, SAFE_CLAIM);
+  assert.doesNotMatch(outside.detail, /区域の外/);
+  // Unknown: the distance guide, labelled as the app's own guide.
+  const unknownNear = alertState({ items, coast: near, inundation: null });
+  assert.equal(unknownNear.imminent, true);
+  assert.equal(unknownNear.basis, 'distance');
+  assert.match(unknownNear.detail, /このアプリの目安です。公的な基準ではありません/);
+  const unknownFar = alertState({ items, coast: far });
+  assert.equal(unknownFar.imminent, false);
+  assert.equal(unknownFar.basis, 'distance');
+  assert.match(unknownFar.detail, /このアプリの目安です。公的な基準ではありません/);
+  // No tsunami warning: no basis, inundation alone never raises the level.
+  const none = alertState({ items: [], areaCodes: ['250'], coast: near, inundation: true });
+  assert.equal(none.imminent, false);
+  assert.equal(none.level, 0);
+  assert.equal(none.basis, null);
+});

@@ -376,3 +376,14 @@ export function computeEvacDirections(data, input, options = {}) {
   ].filter(Boolean).join('');
   return result('ok', value, detail, source, nowMs);
 }
+
+// Public coordinates of one designated site (GSI data), looked up by id.
+// Kept out of computeEvacDirections() results on purpose: together with the
+// distance and bearing they would let anyone rebuild the position. The
+// screen asks for them only to build a map link and to look up the site's
+// elevation. Returns null for an unknown id.
+export function siteCoordinates(data, id) {
+  const i = data?.sites?.findIndex((s) => s.id === id) ?? -1;
+  if (i < 0) return null;
+  return { latitude: data.lat[i], longitude: data.lon[i] };
+}
