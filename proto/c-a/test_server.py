@@ -38,6 +38,29 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(entries[0]["title"], "T")
         self.assertEqual(entries[0]["author"], "A")
 
+    def test_parse_items_from_real_warning_sample(self):
+        # Real JMA message saved in data/samples (Hiroshima, 2026-11-04).
+        sample = Path(__file__).resolve().parents[2] / "data" / "samples" / "20261104083155_0_VPWW53_340000.xml"
+        d = server.parse_detail(sample.read_bytes())
+        self.assertTrue(d["items"])
+        first = d["items"][0]
+        self.assertEqual(first["type"], "気象警報・注意報（府県予報区等）")
+        self.assertEqual(first["area_code"], "340000")
+        self.assertEqual(first["kinds"][0], {"name": "乾燥注意報", "status": "解除"})
+        self.assertTrue(all(i["area_code"] and i["kinds"] for i in d["items"]))
+
+    def test_parse_items_tsunami_shape_and_limits(self):
+        xml = ('<Report><Head><Title>津波警報・注意報・予報a</Title></Head><Body><Tsunami><Forecast>'
+               '<Item><Area><Name>静岡県</Name><Code>380</Code></Area><Category><Kind><Name>大津波警報</Name>'
+               '<Code>52</Code></Kind><LastKind><Name>津波警報</Name></LastKind></Category></Item>'
+               '<Item><Area><Name>X</Name></Area></Item>'
+               '</Forecast></Tsunami></Body></Report>').encode("utf-8")
+        d = server.parse_detail(xml)
+        self.assertEqual(len(d["items"]), 1)
+        self.assertEqual(d["items"][0]["area_code"], "380")
+        self.assertEqual(d["items"][0]["kinds"][0]["name"], "大津波警報")
+        self.assertEqual(server.parse_items(None), [])
+
     def test_parse_detail_missing_parts_are_none(self):
         d = server.parse_detail(b"<Report><Head><Title>x</Title></Head></Report>")
         self.assertIsNone(d["status"])

@@ -1,0 +1,173 @@
+// Alert level for the page border, from public announcements (relay) and,
+// for tsunami warnings only, the distance to the coast line.
+//
+// BW-S1: the level comes from the NAME of the official kind (注意報 /
+// 警報 / 危険警報 / 特別警報 / 津波警報 ...) through a fixed table. Nothing
+// here predicts or judges a hazard. The only own threshold is the distance
+// to the coast used for the "imminent" state during an official tsunami
+// warning; it is a ！！仮の値！！ chosen by the project and documented.
+// BW-S3: "no announcement received" is never reported as level 0 / normal;
+// it is "unknown".
+//
+// No I/O and no platform APIs (browsers and Node.js).
+
+export const KIND = 'alert_level';
+const EARTH_R = 6371008.8;
+const RAD = Math.PI / 180;
+
+// ！！仮の値！！ distance to the coast line (tsunami forecast region line)
+// within which an official tsunami warning / major tsunami warning makes the
+// state "imminent".
+export const ALERT_DEFAULTS = Object.freeze({
+  imminentCoastDistanceM: 1000,
+});
+
+// Border colours. Yellow / red / purple follow the JMA warning level
+// colours (level 2 / 3 / 4). JMA uses black for level 5; by the project's
+// decision level 5 uses the purple of level 4 and blinks instead.
+export const LEVEL_STYLE = Object.freeze({
+  0: { color: null, blink: 'none', label: '発表なし（受け取っている範囲）' },
+  2: { color: '#F2E700', blink: 'none', label: '注意報' },
+  3: { color: '#FF2800', blink: 'none', label: '警報' },
+  4: { color: '#AA00AA', blink: 'none', label: '危険警報' },
+  5: { color: '#AA00AA', blink: 'fade3s', label: '特別警報・大津波警報' },
+});
+
+// ---------------------------------------------------------------- kinds
+
+// Level of one official kind name. Returns null for names that do not set
+// a border level (e.g. 緊急地震速報, 解除, なし, plain information).
+// ！！仮の値！！ the table itself (docs/proto/alert.md).
+export function levelOfKind(name, status = null) {
+  if (typeof name !== 'string' || name === '') return null;
+  if (status && /解除|発表警報・注意報はなし/.test(status)) return null;
+  if (/解除|なし$/.test(name)) return null;
+  if (/緊急地震速報/.test(name)) return null;
+  const tsunami = /津波/.test(name);
+  if (tsunami) {
+    if (/大津波/.test(name)) return { level: 5, tsunami: true, warning: true };
+    if (/津波警報/.test(name)) return { level: 3, tsunami: true, warning: true };
+    if (/津波注意報/.test(name)) return { level: 2, tsunami: true, warning: false };
+    return null; // 津波予報（若干の海面変動）など
+  }
+  if (/特別警報/.test(name)) return { level: 5, tsunami: false, warning: true };
+  if (/危険警報|土砂災害警戒情報/.test(name)) return { level: 4, tsunami: false, warning: true };
+  if (/警報/.test(name)) return { level: 3, tsunami: false, warning: true };
+  if (/注意報/.test(name)) return { level: 2, tsunami: false, warning: false };
+  return null;
+}
+
+// ---------------------------------------------------------------- coast
+
+export function prepareCoastData(json) {
+  if (!json || json.format !== 'coast-lines/1') throw new Error(`unsupported coast data: ${json?.format}`);
+  const unit = json.unit;
+  const regions = Object.entries(json.regions).map(([code, r]) => ({
+    code,
+    name: r.name,
+    lines: r.lines.map((enc) => {
+      const pts = [];
+      let x = 0;
+      let y = 0;
+      for (let i = 0; i < enc.length; i += 2) {
+        x = i === 0 ? enc[0] : x + enc[i];
+        y = i === 0 ? enc[1] : y + enc[i + 1];
+        pts.push([x * unit, y * unit]);
+      }
+      return pts;
+    }),
+  }));
+  return Object.freeze({ regions, maxErrorM: json.simplification.max_error_m, attribution: json.attribution, processed: json.processed });
+}
+
+function segDistM(lat, lon, a, b) {
+  // Local equirectangular projection around the point (fine for < ~50 km).
+  const kx = Math.cos(lat * RAD) * RAD * EARTH_R;
+  const ky = RAD * EARTH_R;
+  const ax = (a[0] - lon) * kx;
+  const ay = (a[1] - lat) * ky;
+  const bx = (b[0] - lon) * kx;
+  const by = (b[1] - lat) * ky;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const L = dx * dx + dy * dy;
+  const t = L === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L));
+  return Math.hypot(ax + t * dx, ay + t * dy);
+}
+
+// Nearest tsunami forecast region line. Returns null when farther than
+// maxSearchM from every kept region (the data covers only some regions).
+export function nearestCoast(coast, lat, lon, maxSearchM = 30000) {
+  const pad = maxSearchM / 111000 / Math.max(0.2, Math.cos(lat * RAD));
+  let best = null;
+  for (const r of coast.regions) {
+    for (const line of r.lines) {
+      for (let i = 0; i + 1 < line.length; i++) {
+        const a = line[i];
+        const b = line[i + 1];
+        if ((a[0] < lon - pad && b[0] < lon - pad) || (a[0] > lon + pad && b[0] > lon + pad)
+          || (a[1] < lat - pad && b[1] < lat - pad) || (a[1] > lat + pad && b[1] > lat + pad)) continue;
+        const d = segDistM(lat, lon, a, b);
+        if (!best || d < best.distance_m) best = { distance_m: d, region_code: r.code, region_name: r.name };
+      }
+    }
+  }
+  if (!best || best.distance_m > maxSearchM) return null;
+  return best;
+}
+
+// ---------------------------------------------------------------- state
+
+/**
+ * items: [{ area_code, kinds: [{ name, status }] }] currently in effect
+ *        (already narrowed to the latest telegram per type by the caller).
+ * areaCodes: codes that describe the person's location (warning areas,
+ *        prefecture, ...). Items for other areas are ignored.
+ * coast: result of nearestCoast() (or null when unknown / far).
+ * received: false when no announcement source is reachable -> unknown.
+ */
+export function alertState({ items = [], areaCodes = [], coast = null, received = true }, opts = {}) {
+  const o = { ...ALERT_DEFAULTS, ...opts };
+  if (!received) {
+    return {
+      status: 'unknown', level: null, imminent: false, color: null, blink: 'none',
+      detail: '公的な発表を受け取れていません。警報が出ていないという意味ではありません。',
+      sources: [],
+    };
+  }
+  const codes = new Set(areaCodes.map(String));
+  if (coast?.region_code) codes.add(String(coast.region_code));
+  let level = 0;
+  let tsunamiWarning = null;
+  const sources = [];
+  for (const it of items) {
+    if (!codes.has(String(it.area_code))) continue;
+    for (const k of it.kinds ?? []) {
+      const lv = levelOfKind(k.name, k.status);
+      if (!lv) continue;
+      sources.push({ name: k.name, area_name: it.area_name ?? null, level: lv.level });
+      if (lv.level > level) level = lv.level;
+      if (lv.tsunami && lv.warning && coast && String(it.area_code) === String(coast.region_code)) {
+        if (!tsunamiWarning || lv.level > tsunamiWarning.level) tsunamiWarning = { name: k.name, level: lv.level };
+      }
+    }
+  }
+  // Distance-based state, only during an official tsunami warning for the
+  // nearest coast region. The higher of the two is used.
+  const imminent = Boolean(tsunamiWarning && coast && coast.distance_m <= o.imminentCoastDistanceM);
+  const style = LEVEL_STYLE[level] ?? LEVEL_STYLE[0];
+  const detail = imminent
+    ? `${tsunamiWarning.name}が出ている海岸線から約 ${Math.round(coast.distance_m / 10) * 10} m の位置です。公的な発表と指示を優先してください。`
+    : level === 0
+      ? '受け取っている範囲では、この地域への注意報・警報はありません。発表がないことは、安全という意味ではありません。'
+      : `この地域への発表：${[...new Set(sources.map((s) => s.name))].join('、')}。`;
+  return {
+    status: 'ok',
+    level,
+    imminent,
+    color: imminent ? (style.color ?? LEVEL_STYLE[3].color) : style.color,
+    blink: imminent ? 'hard1s' : style.blink,
+    detail,
+    sources,
+  };
+}

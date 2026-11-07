@@ -1,0 +1,7 @@
+{
+  "name": "bw-alert",
+  "private": true,
+  "type": "module",
+  "description": "Page border alert level from public announcements and the distance to the coast (relay only)",
+  "scripts": { "test": "node --test 'test/*.test.js'" }
+}
