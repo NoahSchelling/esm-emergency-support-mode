@@ -170,7 +170,7 @@ test('no scenario: no site is picked; says why and where to check', { skip }, as
   await page.waitForTimeout(800);
   const s = await state(page);
   assert.equal(s.figure, 'none');
-  assert.match(s.text, /公的な発表を受けていないため、避難場所を選んでいません/);
+  assert.match(s.text, /公的な発表（津波警報など）を受けていないため、避難場所を選んでいません/);
   assert.equal(await page.isVisible('#evac-fallback'), true);
   assert.match(s.text, /民間のサイトです。公的な発表ではありません/);
   assert.match(s.text, /直線の方向です。道順ではありません/);
