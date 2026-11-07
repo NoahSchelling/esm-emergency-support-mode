@@ -29,6 +29,14 @@ const PREF_OFFICE = { latitude: 34.9769, longitude: 138.3831, accuracy: 20 };
 const FICTIONAL = { latitude: 35.0, longitude: 135.0, accuracy: 30 };
 const PERMS = ['geolocation', 'accelerometer', 'gyroscope', 'magnetometer'];
 
+
+// The evacuee/supporter switch is in the menu (item 2) since the redesign.
+async function switchRole(page, role) {
+  if (!(await page.isVisible('#menu-panel'))) await page.click('#menu-button');
+  await page.evaluate(() => { document.getElementById('menu-role').open = true; });
+  await page.click(role === 'support' ? '#tab-support' : '#tab-evac');
+}
+
 let browser;
 const servers = [];
 let caLive = true;
@@ -72,7 +80,7 @@ async function open(url, opts = {}) {
   // so switching earlier could be undone.
   await page.waitForFunction(() => globalThis.__app && globalThis.__evac);
   // The evacuee view is the default; these checks are for the supporter view.
-  await page.click('#tab-support');
+  await switchRole(page, 'support');
   assert.equal(await page.isVisible('#view-support'), true);
   assert.equal(await page.isVisible('#view-evac'), false);
   return { context, page, errors };

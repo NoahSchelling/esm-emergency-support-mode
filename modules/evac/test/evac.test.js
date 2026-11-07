@@ -456,3 +456,13 @@ test('malformed heading values never fall back to an arrow pointing up (N1)', ()
     assert.ok(r.value.candidates.every((c) => c.arrow_deg === null));
   }
 });
+
+test('siteCoordinates: public site coordinates by id, only on request', async () => {
+  const r = computeEvacDirections(data, { latitude: 35.0012345, longitude: 138.0012345, accuracy: 10, hazard: 'tsunami', heading: headingOk(10) }, { now: NOW });
+  const id = r.value.candidates[0].id;
+  const { siteCoordinates } = await import('../evac.js');
+  const c = siteCoordinates(data, id);
+  assert.ok(Number.isFinite(c.latitude) && Number.isFinite(c.longitude));
+  assert.equal(siteCoordinates(data, 'no-such-id'), null);
+  assert.equal(siteCoordinates(null, id), null);
+});

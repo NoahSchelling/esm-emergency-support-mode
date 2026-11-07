@@ -26,6 +26,14 @@ const PREF_OFFICE = { latitude: 34.9769, longitude: 138.3831, accuracy: 20 };
 const OUTSIDE = { latitude: 35.0, longitude: 135.0, accuracy: 30 }; // fictional, outside Shizuoka
 const PERMS = ['geolocation', 'accelerometer', 'gyroscope', 'magnetometer'];
 
+
+// The evacuee/supporter switch is in the menu (item 2) since the redesign.
+async function switchRole(page, role) {
+  if (!(await page.isVisible('#menu-panel'))) await page.click('#menu-button');
+  await page.evaluate(() => { document.getElementById('menu-role').open = true; });
+  await page.click(role === 'support' ? '#tab-support' : '#tab-evac');
+}
+
 let browser;
 let server;
 let base;
@@ -88,6 +96,9 @@ async function open(t, { width = 375, height = 800, scheme = 'light', geo = PREF
     permissions: PERMS,
   });
   t.after(() => ctx.close());
+  // External lookups are answered by fakes (no network in the tests).
+  await ctx.route('https://cyberjapandata2.gsi.go.jp/**', (r) => r.fulfill({ json: { elevation: 12.3, hsrc: '5m（写真測量）' } }));
+  await ctx.route('https://disaportaldata.gsi.go.jp/**', (r) => r.fulfill({ status: 404, body: '' }));
   const page = await ctx.newPage();
   const requests = [];
   page.on('request', (r) => requests.push(r.url()));
@@ -136,7 +147,15 @@ const state = (page) => page.evaluate(() => ({
   figure: document.getElementById('evac-figure').dataset.kind,
   deg: Number(document.getElementById('evac-figure').dataset.deg),
   result: globalThis.__evac.result,
-  text: document.getElementById('view-evac').innerText,
+  // small texts are folded since the redesign: read them opened
+  text: (() => {
+    const v = document.getElementById('view-evac');
+    const open = [...v.querySelectorAll('details')].filter((d) => !d.open);
+    for (const d of open) d.open = true;
+    const t = v.innerText;
+    for (const d of open) d.open = false;
+    return t;
+  })(),
 }));
 
 async function shot(page, name) {
@@ -147,15 +166,15 @@ test('default is the evacuee view; switching is manual only', { skip }, async (t
   const { page } = await open(t);
   assert.equal(await page.isVisible('#view-evac'), true);
   assert.equal(await page.isVisible('#view-support'), false);
-  assert.equal(await page.getAttribute('#tab-evac', 'aria-pressed'), 'true');
-  await page.click('#tab-support');
+  assert.equal(await page.isChecked('#tab-evac'), true);
+  await switchRole(page, 'support');
   assert.equal(await page.isVisible('#view-support'), true);
   assert.equal(await page.isVisible('#view-evac'), false);
   // a simulated public announcement does not switch the view
   await page.evaluate(() => globalThis.dispatchEvent(new CustomEvent('app:simulated-public', { detail: { key: 'tsunami_warning' } })));
   await page.waitForTimeout(400);
   assert.equal(await page.isVisible('#view-support'), true);
-  await page.click('#tab-evac');
+  await switchRole(page, 'evac');
   assert.equal(await page.isVisible('#view-evac'), true);
 });
 
@@ -170,10 +189,14 @@ test('no scenario: no site is picked; says why and where to check', { skip }, as
   await page.waitForTimeout(800);
   const s = await state(page);
   assert.equal(s.figure, 'none');
-  assert.match(s.text, /公的な発表（津波警報など）を受けていないため、避難場所を選んでいません/);
+  assert.match(s.text, /を受けていないため、避難目標は出していません/);
   assert.equal(await page.isVisible('#evac-fallback'), true);
-  assert.match(s.text, /民間のサイトです。公的な発表ではありません/);
-  assert.match(s.text, /直線の方向です。道順ではありません/);
+  // site names and links only (no descriptions)
+  assert.match(s.text, /地理院地図（指定緊急避難場所）/);
+  assert.doesNotMatch(s.text, /民間のサイトです/);
+  // no target: the straight-line note is not needed
+  assert.match(s.text, /避難目標\s*なし/);
+  assert.equal(await page.isVisible('#evac-straight'), false);
 });
 
 test('tsunami mock, no compass: text + north-up figure, never an arrow', { skip }, async (t) => {
@@ -190,15 +213,19 @@ test('tsunami mock, no compass: text + north-up figure, never an arrow', { skip 
   assert.equal(c.arrow_deg, null);
   assert.equal(s.deg, c.bearing_deg);
   assert.match(s.text, /【模擬】津波警報/);
-  assert.match(s.text, /北を上にした図です。端末の向きとは関係ありません/);
+  assert.match(s.text, /北を上にした図にします（点と点線が避難場所の方向です）/);
   assert.match(s.text, /北から約 \d+ 度/);
   assert.match(s.text, /直線で約 /);
   assert.match(s.text, /直線の方向です。道順ではありません/);
   assert.match(s.text, /公的情報の受信：1 分以内.*【模擬】/);
   assert.ok(s.text.includes(c.name));
-  // only same-origin requests (page, modules, data); the position is not sent
-  for (const u of requests) assert.ok(u.startsWith(base), u);
+  // Same-origin requests (page, modules, data) and, without consent, only the
+  // elevation of the designated site (public coordinates). The person's
+  // position is not sent; no hazard map tile is fetched.
+  const ELEV = 'https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php?';
+  for (const u of requests) assert.ok(u.startsWith(base) || u.startsWith(ELEV), u);
   assert.ok(!requests.some((u) => /34\.97|138\.38/.test(u)));
+  assert.ok(!requests.some((u) => u.includes('disaportaldata')));
   await shot(page, 'evac-text-375-light');
 });
 
@@ -233,7 +260,7 @@ test('Android-like, walking with the course matching the compass: arrow = bearin
   const expectedArrow = ((Math.atan2(Math.sin(d) * Math.cos(b20), Math.cos(d)) * 180) / Math.PI + 360) % 360;
   assert.ok(Math.abs(c.arrow_deg - expectedArrow) < 0.3, `${c.arrow_deg} vs ${expectedArrow}`);
   assert.equal(s.deg, c.arrow_deg);
-  assert.match(await page.getAttribute('.evac-arrow-svg', 'aria-label'), /画面の上/);
+  assert.match(await page.getAttribute('.compass-svg', 'aria-label'), /画面の上/);
   assert.match(s.text, /いま進んでいる方向（GPS）/);
   assert.deepEqual(errors.filter((e) => /evac/.test(e)), []);
   await shot(page, 'evac-arrow-android-375-light');
@@ -281,7 +308,7 @@ test('simulated lift: the direction display stops and says so', { skip }, async 
   await start(page);
   assert.equal((await state(page)).result.status, 'ok');
   await page.evaluate(() => globalThis.dispatchEvent(new CustomEvent('app:simulated-lift', { detail: { key: 'tsunami_warning' } })));
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(1200); // the evacuee view redraws once a second
   const s = await state(page);
   assert.equal(s.figure, 'none');
   assert.match(s.text, /解除を受けたため、方向の表示をやめました/);
@@ -323,6 +350,27 @@ test('iPhone-like (webkitCompassHeading): permission asked on the button, arrow 
   assert.equal(v.heading.basis, 'ios_compass');
   const expectedHeading = 180 - DECL_PREF_OFFICE;
   assert.ok(Math.abs(v.heading.true_heading_deg - expectedHeading) < 0.2, `${v.heading.true_heading_deg} vs ${expectedHeading}`);
+  // Heading up: the upward arrow (direction faced) is fixed; the dial turns
+  // by minus the heading and the target mark by its angle on the screen.
+  const fig = await page.evaluate(() => {
+    const deg = (el) => Number(/rotate\((-?[\d.]+)deg\)/.exec(el.style.transform)?.[1]);
+    return {
+      orientation: document.querySelector('.compass-svg').dataset.orientation,
+      up: getComputedStyle(document.querySelector('.c-up')).display,
+      upTransform: document.querySelector('.c-up').style.transform,
+      dial: deg(document.querySelector('.c-dial')),
+      target: deg(document.querySelector('.c-target-up')),
+      dot: getComputedStyle(document.querySelector('.c-target')).display,
+      facing: document.getElementById('facing').textContent,
+    };
+  });
+  assert.equal(fig.orientation, 'heading-up');
+  assert.notEqual(fig.up, 'none');
+  assert.equal(fig.upTransform, '');
+  assert.ok(Math.abs(((fig.dial + v.heading.true_heading_deg) % 360 + 360) % 360) < 0.6 || Math.abs(((fig.dial + v.heading.true_heading_deg) % 360 + 360) % 360 - 360) < 0.6, `dial ${fig.dial}`);
+  assert.ok(Math.abs((((fig.target - s.deg) % 360) + 360) % 360) < 0.6, `target ${fig.target} vs ${s.deg}`);
+  assert.equal(fig.dot, 'none');
+  assert.match(fig.facing, /^南 \d+°$/);
   await shot(page, 'evac-arrow-iphone-375-light');
 });
 
@@ -333,6 +381,9 @@ test('iPhone-like: uncalibrated compass (accuracy -1) -> no arrow, says calibrat
   const s = await state(page);
   assert.equal(s.figure, 'north-up');
   assert.match(s.text, /校正/);
+  // not heading up: no upward arrow, the target is a dot on a north-up dial
+  assert.equal(await page.evaluate(() => document.querySelector('.compass-svg').dataset.orientation), 'north-up');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.c-up')).display), 'none');
 });
 
 test('"通れない": excludes the direction, shows it, and can be undone', { skip }, async (t) => {

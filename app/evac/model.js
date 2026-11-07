@@ -68,6 +68,14 @@ export function arrowLabel(deg) {
   return d < 180 ? `画面の上から右へ約 ${d} 度` : `画面の上から左へ約 ${360 - d} 度`;
 }
 
+// Direction the device faces, in 8 directions and degrees: "北東 45°".
+const DIRS8 = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+export function facingText(deg) {
+  if (!Number.isFinite(deg)) return '';
+  const d = ((Math.round(deg) % 360) + 360) % 360;
+  return `${DIRS8[Math.round(d / 45) % 8]} ${d}°`;
+}
+
 function courseRelText(rel) {
   if (rel === null || rel === undefined) return '';
   if (Math.abs(rel) <= 10) return '進んでいる方向とほぼ同じです。';
@@ -108,14 +116,14 @@ export function evacViewModel({ scenario = null, lifted = null, context = null, 
   if (context && (context.message || !sc)) {
     return {
       ...base,
-      message: context.message || '避難場所の方向を示す公的な発表（津波警報など）を受けていないため、避難場所を選んでいません。市町村の発表とハザードマップを確かめてください。',
+      message: context.message || '津波警報などを受けていないため、避難目標は出していません。',
       showFallback: true,
     };
   }
   if (!sc) {
     return {
       ...base,
-      message: '災害の種別を示す公的な発表を受けていないため、避難場所を選んでいません。市町村の発表とハザードマップを確かめてください。',
+      message: '災害の種別を示す発表を受けていないため、避難目標は出していません。',
       showFallback: true,
     };
   }

@@ -15,7 +15,7 @@ function levelsOf(demo) {
   for (let i = 0; i < demo.events.length; i++) {
     const st = replayState(demo, i * demo.stepMs);
     const near = nearestCoast(coast, demo.position.latitude, demo.position.longitude);
-    const s = alertState({ items: st.items, areaCodes: ['demo'], coast: near });
+    const s = alertState({ items: st.items, areaCodes: ['demo'], coast: near, inundation: demo.lookup.inundation });
     out.push(`${s.level}${s.imminent ? '!' : ''}`);
   }
   return out;
@@ -50,7 +50,7 @@ test('replay: steps, the last state stays, set/keep semantics', () => {
 });
 
 test('border levels through each demo (! = imminent)', () => {
-  assert.deepEqual(levelsOf(DEMOS.shizuoka), ['3!', '5!', '2', '0']);
+  assert.deepEqual(levelsOf(DEMOS.shizuoka), ['0', '2', '3!', '5!', '5!', '2', '0']);
   assert.deepEqual(levelsOf(DEMOS.fukushima), ['0', '0', '5!', '5!', '5!', '5!', '5!', '3!', '2', '0']);
   assert.deepEqual(levelsOf(DEMOS.chiba), ['3', '3', '3', '4', '0']);
   assert.deepEqual(levelsOf(DEMOS.tokyo), ['3', '3', '3', '3', '4', '5', '4', '3', '0']);
@@ -58,8 +58,11 @@ test('border levels through each demo (! = imminent)', () => {
 
 test('tsunami in effect drives the evacuee view only in tsunami demos', () => {
   const s = DEMOS.shizuoka;
-  assert.equal(tsunamiInEffect(replayState(s, 0)).name, '津波警報');
-  assert.equal(tsunamiInEffect(replayState(s, s.stepMs * 2)), null); // advisory
+  assert.equal(tsunamiInEffect(replayState(s, 0)), null); // the earthquake only
+  assert.equal(tsunamiInEffect(replayState(s, s.stepMs)), null); // advisory
+  assert.equal(tsunamiInEffect(replayState(s, s.stepMs * 2)).name, '津波警報');
+  assert.equal(tsunamiInEffect(replayState(s, s.stepMs * 4)).max_height.description, '10m以上');
+  assert.equal(tsunamiInEffect(replayState(s, s.stepMs * 5)), null); // advisory
   assert.equal(tsunamiInEffect(replayState(DEMOS.tokyo, DEMOS.tokyo.stepMs * 5)), null);
   assert.equal(DEMOS.tokyo.hazardOnTsunami, null);
 });

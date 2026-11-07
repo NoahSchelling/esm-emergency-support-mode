@@ -110,6 +110,42 @@ def parse_atom(data):
 MAX_ITEMS = 400
 
 
+def parse_max_height(el):
+    """Forecast tsunami height of one area (Item/MaxHeight), copied as given.
+
+    JMA writes it as jmx_eb:TsunamiHeight with a value in metres and a
+    description such as "３ｍ", "１０ｍ超" or "巨大" (qualitative, no
+    number). Nothing is judged here: the description, the number (or None)
+    and the condition attribute are kept, plus a flag that says the value is
+    a lower bound or not a number ("unbounded"), so the screen never treats
+    "10 m or more" as a height it can compare against.
+    """
+    if el is None:
+        return None
+    for h in el.iter():
+        if local_name(h.tag) != "TsunamiHeight":
+            continue
+        text = (h.text or "").strip()
+        try:
+            value = float(text)
+            if value != value:  # NaN
+                value = None
+        except ValueError:
+            value = None
+        desc = h.get("description") or None
+        cond = h.get("condition") or None
+        marks = (desc or "") + (cond or "")
+        unbounded = value is None or any(m in marks for m in ("超", "以上", "巨大", "高い"))
+        return {
+            "description": desc,
+            "value_m": value,
+            "unit": h.get("unit") or None,
+            "condition": cond,
+            "unbounded": unbounded,
+        }
+    return None
+
+
 def parse_items(body):
     """Per-area kinds from Body/.../Item (warnings, tsunami forecasts).
 
@@ -136,12 +172,16 @@ def parse_items(body):
                             kinds.append({"name": kn, "status": child_text(k, "Status")})
                 code = child_text(area, "Code") if area is not None else None
                 if code and kinds:
-                    out.append({
+                    row = {
                         "type": wtype,
                         "area_code": code,
                         "area_name": child_text(area, "Name"),
                         "kinds": kinds[:10],
-                    })
+                    }
+                    height = parse_max_height(child(c, "MaxHeight"))
+                    if height is not None:
+                        row["max_height"] = height
+                    out.append(row)
                     if len(out) >= MAX_ITEMS:
                         return out
             else:

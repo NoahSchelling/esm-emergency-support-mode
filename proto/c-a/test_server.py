@@ -61,6 +61,26 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(d["items"][0]["kinds"][0]["name"], "大津波警報")
         self.assertEqual(server.parse_items(None), [])
 
+    def test_parse_items_tsunami_max_height(self):
+        ns = 'xmlns:jmx_eb="http://xml.kishou.go.jp/jmaxml1/elementBasis1/"'
+        def item(code, height):
+            return (f'<Item><Area><Name>A{code}</Name><Code>{code}</Code></Area><Category><Kind><Name>大津波警報</Name></Kind></Category>'
+                    f'<MaxHeight>{height}</MaxHeight></Item>')
+        xml = (f'<Report {ns}><Body><Tsunami><Forecast>'
+               + item('380', '<jmx_eb:TsunamiHeight type="津波の高さ" unit="m" description="３ｍ">3</jmx_eb:TsunamiHeight>')
+               + item('250', '<jmx_eb:TsunamiHeight type="津波の高さ" unit="m" description="１０ｍ超" condition="以上">10</jmx_eb:TsunamiHeight>')
+               + item('312', '<jmx_eb:TsunamiHeight type="津波の高さ" unit="m" description="巨大">NaN</jmx_eb:TsunamiHeight>')
+               + '<Item><Area><Name>B</Name><Code>311</Code></Area><Category><Kind><Name>津波注意報</Name></Kind></Category></Item>'
+               + '</Forecast></Tsunami></Body></Report>').encode("utf-8")
+        items = {i["area_code"]: i for i in server.parse_detail(xml)["items"]}
+        self.assertEqual(items["380"]["max_height"]["value_m"], 3.0)
+        self.assertEqual(items["380"]["max_height"]["description"], "３ｍ")
+        self.assertFalse(items["380"]["max_height"]["unbounded"])
+        self.assertTrue(items["250"]["max_height"]["unbounded"])
+        self.assertIsNone(items["312"]["max_height"]["value_m"])
+        self.assertTrue(items["312"]["max_height"]["unbounded"])
+        self.assertNotIn("max_height", items["311"])
+
     def test_parse_detail_missing_parts_are_none(self):
         d = server.parse_detail(b"<Report><Head><Title>x</Title></Head></Report>")
         self.assertIsNone(d["status"])
