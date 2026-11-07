@@ -26,6 +26,14 @@ const PREF_OFFICE = { latitude: 34.9769, longitude: 138.3831, accuracy: 20 };
 const OUTSIDE = { latitude: 35.0, longitude: 135.0, accuracy: 30 }; // fictional, outside Shizuoka
 const PERMS = ['geolocation', 'accelerometer', 'gyroscope', 'magnetometer'];
 
+
+// The evacuee/supporter switch is in the menu (item 2) since the redesign.
+async function switchRole(page, role) {
+  if (!(await page.isVisible('#menu-panel'))) await page.click('#menu-button');
+  await page.evaluate(() => { document.getElementById('menu-role').open = true; });
+  await page.click(role === 'support' ? '#tab-support' : '#tab-evac');
+}
+
 let browser;
 let server;
 let base;
@@ -88,6 +96,9 @@ async function open(t, { width = 375, height = 800, scheme = 'light', geo = PREF
     permissions: PERMS,
   });
   t.after(() => ctx.close());
+  // External lookups are answered by fakes (no network in the tests).
+  await ctx.route('https://cyberjapandata2.gsi.go.jp/**', (r) => r.fulfill({ json: { elevation: 12.3, hsrc: '5m（写真測量）' } }));
+  await ctx.route('https://disaportaldata.gsi.go.jp/**', (r) => r.fulfill({ status: 404, body: '' }));
   const page = await ctx.newPage();
   const requests = [];
   page.on('request', (r) => requests.push(r.url()));
@@ -148,14 +159,14 @@ test('default is the evacuee view; switching is manual only', { skip }, async (t
   assert.equal(await page.isVisible('#view-evac'), true);
   assert.equal(await page.isVisible('#view-support'), false);
   assert.equal(await page.getAttribute('#tab-evac', 'aria-pressed'), 'true');
-  await page.click('#tab-support');
+  await switchRole(page, 'support');
   assert.equal(await page.isVisible('#view-support'), true);
   assert.equal(await page.isVisible('#view-evac'), false);
   // a simulated public announcement does not switch the view
   await page.evaluate(() => globalThis.dispatchEvent(new CustomEvent('app:simulated-public', { detail: { key: 'tsunami_warning' } })));
   await page.waitForTimeout(400);
   assert.equal(await page.isVisible('#view-support'), true);
-  await page.click('#tab-evac');
+  await switchRole(page, 'evac');
   assert.equal(await page.isVisible('#view-evac'), true);
 });
 
@@ -196,9 +207,13 @@ test('tsunami mock, no compass: text + north-up figure, never an arrow', { skip 
   assert.match(s.text, /直線の方向です。道順ではありません/);
   assert.match(s.text, /公的情報の受信：1 分以内.*【模擬】/);
   assert.ok(s.text.includes(c.name));
-  // only same-origin requests (page, modules, data); the position is not sent
-  for (const u of requests) assert.ok(u.startsWith(base), u);
+  // Same-origin requests (page, modules, data) and, without consent, only the
+  // elevation of the designated site (public coordinates). The person's
+  // position is not sent; no hazard map tile is fetched.
+  const ELEV = 'https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php?';
+  for (const u of requests) assert.ok(u.startsWith(base) || u.startsWith(ELEV), u);
   assert.ok(!requests.some((u) => /34\.97|138\.38/.test(u)));
+  assert.ok(!requests.some((u) => u.includes('disaportaldata')));
   await shot(page, 'evac-text-375-light');
 });
 

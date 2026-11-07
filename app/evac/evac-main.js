@@ -6,6 +6,7 @@
 // page's own files and the evacuation data file on the same site.
 
 import { evacViewModel, parseSimParam, scenarioFromSimKey, receptionLine, arrowLabel, SHOCK_TEXT, SCENARIOS } from './model.js';
+import { heightsView, mapRouteUrl, ELEVATION_SOURCE } from '../shell/heights.js';
 
 const $ = (id) => document.getElementById(id);
 const SVG = 'http://www.w3.org/2000/svg';
@@ -37,6 +38,7 @@ async function tryImport(path) {
 
 const E = await tryImport('../../modules/evac/browser/load.js');
 const S = await tryImport('../../modules/sensors/index.js');
+const LK = await tryImport('../shell/lookup.js');
 const evacOk = !E.__error;
 const sensorsOk = !S.__error;
 
@@ -279,6 +281,66 @@ function render() {
   $('evac-fallback').hidden = !m.showFallback;
   $('evac-reception').textContent = receptionLine(reception, now);
   if (simulated) $('sim-banner').hidden = false;
+  renderHeights(m);
+}
+
+// ---------------------------------------------------------------- heights and map link
+
+// Elevation of designated sites: their coordinates are public, so they are
+// looked up without the consent (the person's position is not sent).
+const siteElevations = new Map();
+function siteElevation(id, coords) {
+  if (!coords || LK.__error) return { status: 'unavailable' };
+  if (!siteElevations.has(id)) {
+    siteElevations.set(id, { status: 'loading' });
+    LK.fetchElevation(coords.latitude, coords.longitude).then((r) => { siteElevations.set(id, r); });
+  }
+  return siteElevations.get(id);
+}
+
+function renderHeights(m) {
+  const c = current?.status === 'ok' ? current.value.candidates[0] : null;
+  const coords = c && evacOk && data ? E.siteCoordinates(data, c.id) : null;
+  const site = c ? siteElevation(c.id, coords) : null;
+  const ctx = context;
+  const view = heightsView({
+    forecast: ctx?.forecast ?? null,
+    here: ctx?.here ?? { status: 'none' },
+    site,
+    siteName: c?.name ?? '',
+    mark: ctx?.mark ?? '',
+    received: ctx ? ctx.received !== false : false,
+  });
+  const dl = $('heights-rows');
+  dl.replaceChildren(...view.rows.flatMap((r) => {
+    const dt = document.createElement('dt');
+    dt.textContent = r.label;
+    const dd = document.createElement('dd');
+    dd.dataset.key = r.key;
+    dd.dataset.warn = String(r.warn);
+    dd.append(r.text);
+    if (r.warn) {
+      const w = document.createElement('span');
+      w.className = 'warn';
+      w.textContent = `⚠ ${r.warnText}`;
+      dd.append(w);
+    }
+    return [dt, dd];
+  }));
+  const srcs = [ELEVATION_SOURCE];
+  if (view.siteNote) srcs.push(view.siteNote.replace(/。$/, ''));
+  if (ctx?.here?.status === 'ok' && ctx.here.source) srcs.push(`いる場所：${ctx.here.source}`);
+  srcs.push('予想される津波の高さ：気象庁の発表（デモでは記録・模擬の値）');
+  $('heights-source').textContent = `${srcs.join('。')}。`;
+  const url = mapRouteUrl(coords);
+  $('evac-map-wrap').hidden = !url || m.mode === 'message';
+  if (url) $('evac-map-link').href = url;
+  globalThis.__handoffSources = {
+    ...(globalThis.__handoffSources ?? {}),
+    site: m.primary ? { name: m.primary.name, municipality: m.primary.municipality, distance: m.primary.distance } : null,
+    heights: view.rows.map((r) => ({ label: r.label, text: r.text, warnText: r.warnText })),
+    terrainNote: view.note,
+  };
 }
 
 // ---------------------------------------------------------------- static parts

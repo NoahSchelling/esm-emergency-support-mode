@@ -1,4 +1,4 @@
-/* Minimal styles. No green anywhere (BW-S3): "ok" is shown in blue/grey. */
+/* Minimal styles, light only. No green anywhere (BW-S3): "ok" is shown in blue/grey. */
 :root {
   --bg: #ffffff;
   --fg: #111111;
@@ -11,21 +11,6 @@
   --missing-bg: #e4e4e4; --missing-fg: #222222;
   --mock-bg: #5b2a86; --mock-fg: #ffffff;
   --official-border: #111111;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #121212;
-    --fg: #ececec;
-    --muted: #bdbdbd;
-    --line: #6f6f6f;
-    --card: #1e1e1e;
-    --ok-bg: #1d3557;  --ok-fg: #dbe7ff;
-    --none-bg: #4a3214; --none-fg: #ffe6c4;
-    --stale-bg: #521c1c; --stale-fg: #ffdcdc;
-    --missing-bg: #3a3a3a; --missing-fg: #f0f0f0;
-    --mock-bg: #b98ae6; --mock-fg: #140022;
-    --official-border: #ececec;
-  }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -78,9 +63,6 @@ a { color: inherit; }
 /* ---------------------------------------------------------------- view switch + evacuee view
    Large text, one-hand buttons, no green (BW-S3). */
 :root { --arrow: #0b3d91; --dial: #7a3d00; --accent-bg: #fff3d6; --accent-fg: #3d2600; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --arrow: #9cc3ff; --dial: #ffc48a; --accent-bg: #3d2a00; --accent-fg: #ffe9b8; }
-}
 .view-switch { display: flex; gap: 0; max-width: 760px; margin: 8px auto 0; padding: 0 16px; }
 .view-switch button {
   flex: 1 1 50%; min-height: 52px; font-size: 1.1rem; font-weight: bold; border-radius: 0;
@@ -124,24 +106,9 @@ button.evac-undo { min-height: 48px; min-width: 96px; margin-left: 4px; }
 .evac-reception { font-size: 1rem; }
 .evac-about { font-size: 1rem; }
 
-/* ---------------------------------------------------------------- theme switch
-   The menu sets data-theme on <html>: "light" or "dark" overrides the
-   device setting; without it the device setting is used. */
-:root { color-scheme: light dark; }
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"] { color-scheme: dark;
-    --bg: #121212;
-    --fg: #ececec;
-    --muted: #bdbdbd;
-    --line: #6f6f6f;
-    --card: #1e1e1e;
-    --ok-bg: #1d3557;  --ok-fg: #dbe7ff;
-    --none-bg: #4a3214; --none-fg: #ffe6c4;
-    --stale-bg: #521c1c; --stale-fg: #ffdcdc;
-    --missing-bg: #3a3a3a; --missing-fg: #f0f0f0;
-    --mock-bg: #b98ae6; --mock-fg: #140022;
-    --official-border: #ececec;
-   --arrow: #9cc3ff; --dial: #ffc48a; --accent-bg: #3d2a00; --accent-fg: #ffe9b8; }
+/* Light only (decided 2026-11-07): the page stays light even when the
+   device uses a dark setting. */
+:root { color-scheme: light; }
 
 /* ---------------------------------------------------------------- top bar, menu, status
    No green anywhere (BW-S3). */
@@ -177,3 +144,66 @@ button.evac-undo { min-height: 48px; min-width: 96px; margin-left: 4px; }
 body { padding: 10px 0; }
 
 main, .view-switch { padding-left: 20px; padding-right: 20px; }
+
+/* ---------------------------------------------------------------- redesign (2026-11-07)
+   Top bar and menu button always visible; notices under it; two panes
+   (main / current alert text) switched by swipe or the edge buttons. */
+.top { position: sticky; top: 10px; z-index: 900; background: var(--bg); }
+.topbar { padding-top: 6px; padding-bottom: 6px; }
+.demo-strip { max-width: 760px; margin: 0 auto; padding: 6px 20px; font-weight: bold; background: var(--mock-bg); color: var(--mock-fg); }
+.notices { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+.notice { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; padding: 8px 10px; border-radius: 6px;
+  background: var(--accent-bg); color: var(--accent-fg); border: 2px solid var(--accent-fg); font-weight: bold; }
+.notice p { margin: 0; flex: 1 1 auto; min-width: 0; }
+.notice button { flex: 0 0 auto; min-height: 44px; font-weight: normal; }
+.notices-more { margin: 4px 0; }
+
+.menu-panel { position: relative; }
+.menu-item { border-top: 1px solid var(--line); padding: 2px 0; }
+.menu-item > summary { min-height: 48px; display: flex; align-items: center; font-weight: bold; font-size: 1.05rem; }
+.menu-wide { display: block; width: 100%; min-height: 48px; margin: 8px 0; text-align: left; }
+.demo-toggle[aria-pressed="true"] { background: var(--mock-bg); color: var(--mock-fg); border-color: var(--mock-bg); font-weight: bold; }
+.contact-group { margin: 8px 0 12px; }
+.contact-group h3 { font-size: 1rem; margin: 8px 0 4px; }
+.contact-group li { margin: 4px 0; }
+.contact-num { font-weight: bold; font-size: 1.05rem; }
+#menu-close { margin-top: 12px; }
+
+.pager { position: relative; touch-action: pan-y; }
+.pane { max-width: 760px; margin: 0 auto; }
+#pane-alert { padding: 8px 40px 40px; }
+.pane-title { font-size: 1.2rem; margin: 8px 0; }
+main, .view-switch { padding-left: 40px; padding-right: 40px; }
+.topbar, .menu-panel, .status-line, .demo-box, .notices, .demo-strip { padding-left: 40px; padding-right: 40px; }
+#pane-alert .status-line, #pane-alert .demo-box { padding-left: 0; padding-right: 0; }
+.alert-items { padding-left: 1.2em; font-size: 1.1rem; }
+.alert-items li { margin: 6px 0; }
+
+/* Edge buttons: translucent grey, contrast >= 3:1 against the background
+   (rgba(0,0,0,0.55) on white = #737373, 4.7:1). */
+.pager-btn {
+  position: fixed; top: 50%; transform: translateY(-50%); z-index: 950;
+  width: 30px; min-height: 72px; padding: 0; border: none; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.35); color: rgba(0, 0, 0, 0.55); font-size: 26px; line-height: 1;
+}
+.pager-prev { left: 10px; }
+.pager-next { right: 10px; }
+
+.heights { border: 2px solid var(--fg); border-radius: 6px; padding: 8px 12px; margin: 10px 0; text-align: left; }
+.heights-title { font-size: 1.1rem; margin: 0 0 4px; }
+.heights-rows { margin: 0; }
+.heights-rows dt { font-weight: bold; margin-top: 6px; font-size: 1rem; }
+.heights-rows dd { margin: 0; font-size: 1.2rem; font-weight: bold; }
+.heights-rows dd .warn { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 4px; background: var(--stale-bg); color: var(--stale-fg); font-size: 1rem; }
+.heights-note { font-size: 1.05rem; background: var(--accent-bg); color: var(--accent-fg); padding: 6px 8px; border-radius: 6px; }
+.evac-map { margin: 10px 0; }
+.evac-map-link { display: block; padding: 12px; border: 2px solid var(--fg); border-radius: 6px; font-weight: bold; text-align: center; min-height: 48px; }
+
+.handoff-guide-wrap { max-width: 760px; margin: 8px auto 24px; padding: 0 40px; }
+.handoff-guide { display: block; width: 100%; min-height: 48px; font-size: 0.95rem; }
+.handoff-guide[data-prominence="mid"] { font-size: 1.1rem; font-weight: bold; border-width: 2px; border-color: var(--fg); }
+.handoff-guide[data-prominence="high"] { font-size: 1.25rem; font-weight: bold; min-height: 64px; background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.handoff-panel { max-width: 760px; margin: 0 auto; padding: 8px 40px 40px; border-top: 2px solid var(--fg); }
+.handoff-panel h2 { font-size: 1.2rem; }
+.handoff-text { display: block; width: 100%; font: inherit; font-size: 0.9rem; line-height: 1.5; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.handoff-storage { background: var(--none-bg); color: var(--none-fg); padding: 6px 8px; border-radius: 6px; }

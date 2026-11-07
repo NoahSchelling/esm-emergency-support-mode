@@ -3,67 +3,84 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>緊急支援モード（試作）</title>
 <link rel="stylesheet" href="./app.css">
 </head>
 <body>
-<div id="sim-banner" class="banner" hidden>模擬データを含みます。気象庁の発表ではありません。</div>
-
 <!-- Alert border (10 px). Colour and blinking come from ./shell/shell-main.js. -->
 <div id="alert-frame" class="alert-frame" data-level="unknown" data-blink="none" aria-hidden="true"></div>
 
-<header class="topbar">
-  <span class="topbar-title">緊急支援モード（試作）</span>
-  <button id="menu-button" class="menu-button" type="button" aria-expanded="false" aria-controls="menu-panel">メニュー</button>
-</header>
-<div id="menu-panel" class="menu-panel" hidden>
-  <p class="sub">モード</p>
-  <div class="menu-group" role="group" aria-label="モード">
-    <button type="button" data-mode-choice="live" aria-pressed="true">現在位置</button>
-    <button type="button" data-mode-choice="shizuoka" aria-pressed="false">デモ：静岡県（津波の模擬）</button>
-    <button type="button" data-mode-choice="fukushima" aria-pressed="false">デモ：福島県（2011年の記録）</button>
-    <button type="button" data-mode-choice="chiba" aria-pressed="false">デモ：千葉県（2019年の記録）</button>
-    <button type="button" data-mode-choice="tokyo" aria-pressed="false">デモ：東京都（2019年の記録）</button>
-  </div>
-  <p class="sub">表示の色</p>
-  <div class="menu-group" role="group" aria-label="表示の色">
-    <button type="button" data-theme-choice="auto" aria-pressed="true">端末に合わせる</button>
-    <button type="button" data-theme-choice="light" aria-pressed="false">ライト</button>
-    <button type="button" data-theme-choice="dark" aria-pressed="false">ダーク</button>
-  </div>
-  <p class="note">外枠の色：黄＝注意報、赤＝警報、紫＝危険警報。特別警報・大津波警報は紫でゆっくり点滅。津波警報の中で海岸線の近くにいるときは速く点滅します（海岸線からの距離はこのアプリの仮の基準です）。外枠に色がないことは、安全という意味ではありません。</p>
+<div class="top">
+  <header class="topbar">
+    <span class="topbar-title">緊急支援モード（試作）</span>
+    <button id="menu-button" class="menu-button" type="button" aria-expanded="false" aria-controls="menu-panel">メニュー</button>
+  </header>
+  <p id="demo-strip" class="demo-strip" hidden></p>
+  <div id="sim-banner" class="banner" hidden>模擬データを含みます。気象庁の発表ではありません。</div>
+  <!-- New information: read aloud, stays until closed. -->
+  <div id="notices" class="notices"></div>
 </div>
 
-<section id="status-line" class="status-line" data-level="unknown" aria-live="polite">
-  <p><strong id="status-mode">現在位置</strong>　<span id="status-text">公的な発表を確かめています。</span></p>
-</section>
-
-<section id="demo-box" class="demo-box" hidden>
-  <p id="demo-banner" class="demo-banner"></p>
-  <p id="demo-place" class="note"></p>
-  <p id="demo-now" class="demo-now"></p>
-  <p id="demo-inEffect"></p>
-  <div id="demo-controls" class="buttons" hidden>
-    <button id="demo-pause" type="button">一時停止</button>
-    <button id="demo-restart" type="button">最初から</button>
-    <span id="demo-step" class="note"></span>
-  </div>
-  <details>
-    <summary>これまでの記録（新しい順）</summary>
-    <ol id="demo-log" class="lines"></ol>
+<div id="menu-panel" class="menu-panel" role="region" aria-label="メニュー" hidden>
+  <details class="menu-item" id="menu-prefetch">
+    <summary>事前情報収集</summary>
+    <p class="sub">位置を外に送る取得への同意（まとめて 1 回）</p>
+    <ul id="consent-text" class="lines note"></ul>
+    <p class="status"><strong id="consent-state">同意していません。</strong></p>
+    <button id="consent-toggle" class="menu-wide" type="button" aria-pressed="false">同意して標高と浸水想定を調べる</button>
+    <p id="consent-stop" class="note"></p>
+    <p class="note">地図や自治体の連絡先などを前もって端末に集めておく機能は、次の段階で作ります（いまは未実装です）。</p>
   </details>
-  <details id="demo-sources-wrap">
+  <details class="menu-item" id="menu-role">
+    <summary>避難者／支援者の切り替え</summary>
+    <div class="menu-group" role="group" aria-label="表示の切り替え">
+      <button id="tab-evac" type="button" aria-pressed="true">避難者</button>
+      <button id="tab-support" type="button" aria-pressed="false">支援者</button>
+    </div>
+    <p class="note">自動では切り替わりません。</p>
+  </details>
+  <details class="menu-item" id="menu-history">
+    <summary>これまでの情報履歴</summary>
+    <p class="note">この端末が受け取った公的発表です（デモの記録・模擬も、その印を付けて残します）。この端末だけに保存し、外に送りません。</p>
+    <ol id="history-list" class="lines"></ol>
+    <button id="history-clear" class="menu-wide" type="button">情報履歴を削除する</button>
+  </details>
+  <details class="menu-item" id="menu-sources">
     <summary>記録の出典</summary>
-    <ul id="demo-sources" class="lines note"></ul>
+    <ul id="sources-list" class="lines note"></ul>
   </details>
-</section>
+  <details class="menu-item" id="menu-links">
+    <summary>公的機関のウェブサイトリンク</summary>
+    <div id="links-list"></div>
+  </details>
+  <details class="menu-item" id="menu-contacts">
+    <summary>公的機関の連絡先</summary>
+    <p class="note">急ぐときは 119（消防・救急）、110（警察）、118（海の事件・事故）。</p>
+    <div id="contacts-list"></div>
+  </details>
+  <details class="menu-item" id="menu-feeds">
+    <summary>独自情報の情報取得URL</summary>
+    <p class="note">自治体などの公的機関が独自に出す情報（RSS など）を登録して受け取る機能です。次の段階で作ります（いまは未実装です）。登録できる先は go.jp・lg.jp などの公的機関のドメインに限り、取得は配信元のサーバーの取り次ぎで、https・大きさと時間の上限付きで行う予定です。</p>
+  </details>
+  <details class="menu-item" id="menu-demo">
+    <summary>デモモード</summary>
+    <p class="sub">場所</p>
+    <div class="menu-group" role="group" aria-label="デモの場所">
+      <button type="button" data-demo-place="shizuoka" aria-pressed="true">静岡県（津波の模擬）</button>
+      <button type="button" data-demo-place="fukushima" aria-pressed="false">福島県（2011年の記録）</button>
+      <button type="button" data-demo-place="chiba" aria-pressed="false">千葉県（2019年の記録）</button>
+      <button type="button" data-demo-place="tokyo" aria-pressed="false">東京都（2019年の記録）</button>
+    </div>
+    <button id="demo-toggle" class="menu-wide demo-toggle" type="button" aria-pressed="false">デモ：OFF（押すと ON）</button>
+    <p class="note">OFF のときは現在位置を使います。デモの間は、画面の上に「【模擬】」または「【過去の記録の再生】」と「いま出ている発表ではありません」を出し続けます。</p>
+  </details>
+  <p class="note">外枠の色：黄＝注意報、赤＝警報、紫＝危険警報。特別警報・大津波警報は紫でゆっくり点滅。津波警報の中で、国の津波浸水想定の区域の中にいるときは速く点滅します（区域が分からないときは、海岸線からの距離をこのアプリの目安として使います）。外枠に色がないことは、安全という意味ではありません。</p>
+  <button id="menu-close" class="menu-wide" type="button">メニューを閉じる</button>
+</div>
 
-<nav class="view-switch" aria-label="表示の切り替え">
-  <button id="tab-evac" type="button" aria-pressed="true">避難者</button>
-  <button id="tab-support" type="button" aria-pressed="false">支援者</button>
-</nav>
-
+<div id="pager" class="pager" data-pane="main">
+<section id="pane-main" class="pane" aria-label="メイン画面">
 <!-- Evacuee view (default). Text and buttons only; no input fields. -->
 <main id="view-evac" class="evac" data-mode="message">
   <p class="evac-official">公的な発表と指示を優先してください。</p>
@@ -86,6 +103,18 @@
     <p id="evac-hazards" class="note" hidden></p>
     <p id="evac-remarks" class="evac-remarks" hidden></p>
   </section>
+
+  <section id="heights" class="heights" aria-labelledby="h-heights">
+    <h2 id="h-heights" class="heights-title">標高と予想される津波の高さ</h2>
+    <dl id="heights-rows" class="heights-rows"></dl>
+    <p id="heights-note" class="heights-note"><strong>地形によって津波は予想より高くなる可能性があります。</strong></p>
+    <p id="heights-source" class="note"></p>
+  </section>
+
+  <div id="evac-map-wrap" class="evac-map" hidden>
+    <a id="evac-map-link" class="evac-map-link" href="#" target="_blank" rel="noopener noreferrer">この避難場所まで地図アプリで経路を見る</a>
+    <p class="note"><strong>地図アプリの経路は、通れない道や浸水を考えていません。</strong>地図アプリには避難場所の公開された座標だけを渡します（いる場所は渡しません）。</p>
+  </div>
 
   <button id="evac-exclude" class="evac-big" type="button" disabled>この方向は通れない</button>
   <div id="evac-exclusions-wrap" hidden>
@@ -120,7 +149,7 @@
   </details>
 </main>
 
-<!-- Supporter view: the existing prototype screen, unchanged. -->
+<!-- Supporter view: the existing prototype screen (menu: 避難者／支援者). -->
 <main id="view-support" hidden>
 <!-- 1. BW-S2 -->
 <section id="sec-official" class="official" aria-labelledby="h-official">
@@ -218,8 +247,62 @@
 </section>
 </main>
 
+  <div class="handoff-guide-wrap">
+    <button id="handoff-open" class="handoff-guide" type="button" data-prominence="low">Claude に相談する（引き継ぎメモを作る）</button>
+    <p id="handoff-guide-note" class="note"></p>
+  </div>
+</section>
+
+<section id="pane-alert" class="pane" aria-labelledby="h-alert" hidden>
+  <h2 id="h-alert" class="pane-title">現在の警戒情報</h2>
+  <section id="status-line" class="status-line" data-level="unknown" aria-live="polite">
+    <p><strong id="status-mode">現在位置</strong>　<span id="status-text">公的な発表を確かめています。</span></p>
+  </section>
+  <ul id="alert-items" class="alert-items"></ul>
+  <p id="alert-received" class="note"></p>
+  <p class="note">公的な発表と指示を優先してください。この画面は、受け取った発表の種類と対象地域を中継するだけです。</p>
+  <section id="demo-box" class="demo-box" hidden>
+    <p id="demo-banner" class="demo-banner"></p>
+    <p id="demo-place" class="note"></p>
+    <p id="demo-now" class="demo-now"></p>
+    <p id="demo-inEffect"></p>
+    <div id="demo-controls" class="buttons" hidden>
+      <button id="demo-pause" type="button">一時停止</button>
+      <button id="demo-restart" type="button">最初から</button>
+      <span id="demo-step" class="note"></span>
+    </div>
+    <details>
+      <summary>これまでの記録（新しい順）</summary>
+      <ol id="demo-log" class="lines"></ol>
+    </details>
+  </section>
+</section>
+</div>
+
+<!-- Left/right edge buttons switch the screen. The swipe itself is detected in the middle of the screen. -->
+<button id="pager-prev" class="pager-btn pager-prev" type="button" aria-label="前の画面へ" aria-controls="pager">◀</button>
+<button id="pager-next" class="pager-btn pager-next" type="button" aria-label="次の画面へ" aria-controls="pager">▶</button>
+
+<div id="handoff-panel" class="handoff-panel" role="region" aria-labelledby="h-handoff" hidden>
+  <h2 id="h-handoff">引き継ぎメモ</h2>
+  <p class="note">Claude（または人）に渡すためのメモの下書きです。アプリが自動で埋めた部分と、手で書く部分があります。このアプリは医療や心の診断・助言をしません。急ぐときは 119 へ。</p>
+  <p class="handoff-storage"><strong id="handoff-storage-note">この下書きはこの端末に保存されます。人に渡す前や、不要になったら「内容削除」を押してください。</strong></p>
+  <label for="handoff-text" class="sub">下書き（Markdown）</label>
+  <textarea id="handoff-text" class="handoff-text" rows="18" spellcheck="false"></textarea>
+  <div class="buttons">
+    <button id="handoff-copy" type="button">コピー</button>
+    <button id="handoff-download" type="button">ダウンロード（.md）</button>
+    <button id="handoff-clear" type="button">内容削除</button>
+    <button id="handoff-rebuild" type="button">自動の部分を作り直す</button>
+  </div>
+  <p id="handoff-status" class="note" role="status"></p>
+  <p class="note">Claude の Skill（リポジトリの skills/handoff-interview）を入れると、このメモをもとに一度に一つずつ聞き取り、専門家に見せられる形にまとめます。Skill がなくても、メモの先頭の指示文ごと貼り付ければ同じように頼めます。</p>
+  <button id="handoff-close" class="menu-wide" type="button">閉じる</button>
+</div>
+
 <script type="module" src="./shell/shell-main.js"></script>
 <script type="module" src="./evac/evac-main.js"></script>
+<script type="module" src="./handoff/handoff-main.js"></script>
 <script type="module" src="./main.js"></script>
 </body>
 </html>

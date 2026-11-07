@@ -17,7 +17,8 @@ export function itemsFromStatus(status) {
     const t = d.report_datetime ?? e.updated ?? 0;
     if (!newest.has(key) || newest.get(key).t < t) newest.set(key, { t, items: d.items });
   }
-  const items = [...newest.values()].flatMap((x) => x.items);
+  // report_ms identifies the message (stable across reloads, for the history).
+  const items = [...newest.values()].flatMap((x) => x.items.map((it) => ({ ...it, report_ms: Number.isFinite(x.t) ? x.t : null })));
   return { items, simulated: status.source?.mode !== 'live', count: newest.size };
 }
 
@@ -46,6 +47,27 @@ export function tsunamiWarningFor(items, coast) {
       if (k.status && /解除/.test(k.status)) continue;
       if (/大津波|津波警報/.test(k.name)) return { name: k.name, area: it.area_name ?? coast.region_name };
     }
+  }
+  return null;
+}
+
+// Forecast tsunami height for the nearest coast region (JMA tsunami
+// warning / advisory messages, Item/MaxHeight as relayed by C-A, or the
+// demo scripts). Copied as given; null when no height is in effect.
+export function forecastHeightFor(items, coast) {
+  if (!coast) return null;
+  for (const it of items ?? []) {
+    if (String(it.area_code) !== String(coast.region_code) || !it.max_height) continue;
+    if ((it.kinds ?? []).every((k) => k.status && /解除/.test(k.status))) continue;
+    const h = it.max_height;
+    const value = Number.isFinite(h.value_m) ? h.value_m : null;
+    return {
+      text: h.description || (value !== null ? `${value}m` : '不明'),
+      value_m: value,
+      unbounded: Boolean(h.unbounded) || value === null,
+      area: it.area_name ?? coast.region_name,
+      kind: it.kinds?.[0]?.name ?? '',
+    };
   }
   return null;
 }
