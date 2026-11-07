@@ -71,3 +71,18 @@ export function forecastHeightFor(items, coast) {
   }
   return null;
 }
+
+// The highest observed tsunami height published for the nearest coast
+// region (demo facts: { type: 'tsunami-obs', height, place, region }).
+// Copied as given; null when there is none. The caller compares it with the
+// forecast and uses the higher one.
+export function observedHeightFor(facts, coast, parse) {
+  if (!coast) return null;
+  let best = null;
+  for (const f of facts ?? []) {
+    if (f.type !== 'tsunami-obs' || String(f.region ?? '') !== String(coast.region_code)) continue;
+    const h = { ...parse(f.height), place: f.place };
+    if (!best || (h.unbounded && !best.unbounded) || (h.unbounded === best.unbounded && (h.value_m ?? -Infinity) > (best.value_m ?? -Infinity))) best = h;
+  }
+  return best;
+}

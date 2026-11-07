@@ -12,12 +12,14 @@
 // map tile around it is fetched from the hazard map portal (./lookup.js).
 
 import { DEMOS, DEMO_IDS, DEMO_AREA_CODE, replayState, tsunamiInEffect, demoElapsedHours, recordTimeMs } from './demos.js';
-import { itemsFromStatus, areaCodesFromArea, tsunamiWarningFor, forecastHeightFor } from './live.js';
+import { itemsFromStatus, areaCodesFromArea, tsunamiWarningFor, forecastHeightFor, observedHeightFor } from './live.js';
+import { parseHeight } from './heights.js';
 import { createHistory, entriesFromItems, disasterStartMs, historyLine } from './history.js';
 import { readConsent, writeConsent, CONSENT_TEXT, CONSENT_STOP } from './consent.js';
 import { CONTACT_GROUPS, CHECKED, telHref } from './contacts.js';
 import { stageAt, guideProminence } from '../handoff/handoff.js';
-import { formatJstHm, minutesAgoText } from '../evac/model.js';
+import { minutesAgoText } from '../evac/model.js';
+import { infoLines, formatMdHm, recordMdHm, observedLevel } from './infolines.js';
 
 const $ = (id) => document.getElementById(id);
 const TICK_MS = 250;
@@ -64,15 +66,17 @@ try { storage()?.removeItem('bw-theme'); } catch { /* ignore */ }
 
 const menuBtn = $('menu-button');
 const menu = $('menu-panel');
+// Hamburger button: the panel opens over the screen.
 function setMenu(open) {
   menu.hidden = !open;
   menuBtn.setAttribute('aria-expanded', String(open));
-  menuBtn.textContent = open ? 'メニューを閉じる' : 'メニュー';
+  menuBtn.setAttribute('aria-label', open ? 'メニューを閉じる' : 'メニューを開く');
 }
 menuBtn.addEventListener('click', () => setMenu(menu.hidden));
 $('menu-close').addEventListener('click', () => { setMenu(false); menuBtn.focus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
-for (const id of ['tab-evac', 'tab-support']) $(id).addEventListener('click', () => setMenu(false));
+// A choice applies at once; the menu closes so the change can be seen.
+for (const id of ['tab-evac', 'tab-support']) $(id).addEventListener('change', () => setMenu(false));
 setMenu(false);
 
 // ---------------------------------------------------------------- panes (swipe, edge buttons)
@@ -179,23 +183,19 @@ function setMode(m) {
   demoStart = Date.now();
   demoPaused = false;
   $('demo-pause').textContent = '一時停止';
-  for (const b of document.querySelectorAll('[data-demo-place]')) b.setAttribute('aria-pressed', String(b.dataset.demoPlace === demoPlace));
-  const t = $('demo-toggle');
-  t.setAttribute('aria-pressed', String(demoOn));
-  t.textContent = demoOn ? `デモ：ON（${DEMOS[demoPlace].label}）　押すと OFF` : 'デモ：OFF（押すと ON）';
+  $('demo-place').value = demoPlace;
+  $('demo-toggle').checked = demoOn;
   $('demo-controls').hidden = mode === 'live';
   lastLevel = null;
   if (mode === 'live') pollCa().then(render);
   render();
 }
-for (const b of document.querySelectorAll('[data-demo-place]')) {
-  b.addEventListener('click', () => {
-    demoPlace = b.dataset.demoPlace;
-    if (demoOn) setMode(demoPlace);
-    else for (const x of document.querySelectorAll('[data-demo-place]')) x.setAttribute('aria-pressed', String(x.dataset.demoPlace === demoPlace));
-  });
-}
-$('demo-toggle').addEventListener('click', () => { setMode(demoOn ? 'live' : demoPlace); setMenu(false); });
+// Place: a drop-down list. ON/OFF: a toggle switch. Both apply at once.
+$('demo-place').addEventListener('change', () => {
+  demoPlace = DEMO_IDS.includes($('demo-place').value) ? $('demo-place').value : demoPlace;
+  if (demoOn) setMode(demoPlace);
+});
+$('demo-toggle').addEventListener('change', () => { setMode($('demo-toggle').checked ? demoPlace : 'live'); setMenu(false); });
 $('demo-restart').addEventListener('click', () => { demoStart = Date.now(); demoPaused = false; $('demo-pause').textContent = '一時停止'; render(); });
 $('demo-pause').addEventListener('click', () => {
   if (demoPaused) {
@@ -228,20 +228,24 @@ $('evac-start')?.addEventListener('click', () => locSensor?.start());
 let consent = readConsent(storage());
 function renderConsent() {
   $('consent-state').textContent = consent.granted
-    ? `同意しています（${formatJstHm(consent.at)} から）。位置が大きく変わったときに、標高と浸水想定を調べます。`
-    : '同意していません。いる場所の位置は外に送りません。';
-  const b = $('consent-toggle');
-  b.setAttribute('aria-pressed', String(consent.granted));
-  b.textContent = consent.granted ? '同意をやめる' : '同意して標高と浸水想定を調べる';
+    ? `同意しています（${formatMdHm(consent.at)} から）。`
+    : '同意していません。位置は外に送りません。';
+  $('consent-yes').checked = consent.granted;
+  $('consent-no').checked = !consent.granted;
 }
 $('consent-text').replaceChildren(...CONSENT_TEXT.map(li));
 $('consent-stop').textContent = CONSENT_STOP;
-$('consent-toggle').addEventListener('click', () => {
-  consent = writeConsent(storage(), !consent.granted);
-  liveLookup = { key: null, here: null, inundation: null };
-  renderConsent();
-  render();
-});
+// Two choices as radio buttons; the choice applies at once.
+for (const id of ['consent-yes', 'consent-no']) {
+  $(id).addEventListener('change', () => {
+    const granted = $('consent-yes').checked;
+    if (granted === consent.granted) return;
+    consent = writeConsent(storage(), granted);
+    liveLookup = { key: null, here: null, inundation: null };
+    renderConsent();
+    render();
+  });
+}
 renderConsent();
 
 // Live lookups (only with consent and a position).
@@ -279,18 +283,21 @@ const history = createHistory(storage());
 function renderHistory() {
   const list = history.list();
   $('history-list').replaceChildren(...(list.length
-    ? list.slice().reverse().map((e) => li(historyLine(e, formatJstFull)))
+    ? list.slice().reverse().map((e) => li(historyLine(e, formatMdHm)))
     : [li('まだ記録がありません（受け取っていないことは、発表がなかったという意味ではありません）。')]));
-}
-function formatJstFull(ms) {
-  const t = new Date(ms + 9 * 3600 * 1000).toISOString();
-  return `${t.slice(0, 10)} ${t.slice(11, 16)}`;
 }
 $('history-clear').addEventListener('click', () => {
   history.clear();
   renderHistory();
 });
 renderHistory();
+
+// A tsunami advisory or warning in effect for the nearest coast region.
+function tsunamiInEffectFor(items, coast) {
+  if (!coast) return false;
+  return (items ?? []).some((it) => String(it.area_code) === String(coast.region_code)
+    && (it.kinds ?? []).some((k) => /津波/.test(k.name) && levelOf(k.name, k.status)));
+}
 
 function levelOf(name, status) {
   return A.__error ? null : A.levelOfKind(name, status);
@@ -359,7 +366,8 @@ function demoInputs(now) {
 let lastDispatch = '';
 function tellEvacuee(inp, state) {
   const forecast = forecastHeightFor(state.status === 'ok' ? inp.items : [], inp.coast);
-  const common = { forecast, here: inp.here, received: inp.received, mark: inp.mark };
+  const observed = state.status === 'ok' && inp.observed ? observedHeightFor(inp.replay?.facts ?? [], inp.coast, parseHeight) : null;
+  const common = { forecast, observed, here: inp.here, received: inp.received, mark: inp.mark };
   let detail;
   if (inp.demo) {
     const ts = tsunamiInEffect(inp.replay);
@@ -375,8 +383,8 @@ function tellEvacuee(inp, state) {
         origin: inp.demo.banner,
       } : null,
       message: hazard && !inp.demo.hasEvacData
-        ? 'このデモには避難場所のデータがありません（いまは静岡県のデータだけを持っています）。'
-        : hazard ? '' : 'このデモの記録では、いま避難場所の方向を示す発表（津波警報など）は出ていません。',
+        ? 'このデモには避難場所のデータがありません（いまは静岡県だけです）。'
+        : hazard ? '' : '津波警報などが出ていないため、避難目標は出していません。',
       position: inp.position,
       hasEvacData: inp.demo.hasEvacData,
       receivedMs: inp.receivedMs,
@@ -444,7 +452,7 @@ function recordAndNotify(inp, state) {
   }
   if (added.length) renderHistory();
   if (lastLevel !== null && lastLevel > 0 && state.level === 0) {
-    notify(`${inp.mark}受け取っている範囲では、この地域への注意報・警報がなくなりました。解除の内容は公的な発表で確かめてください。`, 'level0');
+    notify(`${inp.mark}この地域への注意報・警報がなくなりました（受け取っている範囲で）。公的な発表で確かめてください。`, 'level0');
   }
   lastLevel = state.level;
 }
@@ -460,6 +468,13 @@ let current = null;
 function render() {
   const now = Date.now();
   const inp = mode === 'live' ? liveInputs(now) : demoInputs(now);
+  // The highest observed tsunami height for the nearest coast region: the
+  // border uses the higher of the announcements and its height class.
+  // Used only while a tsunami announcement (advisory or warning) is in
+  // effect for that region: once everything is lifted, an old observation
+  // does not keep the border up.
+  const obs = tsunamiInEffectFor(inp.items, inp.coast) ? observedHeightFor(inp.replay?.facts ?? [], inp.coast, parseHeight) : null;
+  inp.observed = obs ? { level: observedLevel(obs), text: obs.text, place: obs.place } : null;
   const unknown = (detail) => ({ status: 'unknown', level: null, imminent: false, basis: null, color: null, blink: 'none', detail, sources: [] });
   let state;
   if (A.__error) state = unknown('外枠のモジュールを読み込めませんでした。');
@@ -473,40 +488,46 @@ function render() {
   frame.dataset.blink = state.blink;
   frame.style.setProperty('--frame-color', state.color ?? 'var(--bg)');
 
-  // Demo mark at the top: visible whichever pane is shown.
-  const strip = $('demo-strip');
-  strip.hidden = !inp.demo;
-  strip.textContent = inp.demo ? `${inp.demo.banner}（デモ：${inp.demo.label}）` : '';
+  renderHeadline(inp, state);
 
   // Sub-screen 1: the current alert as text.
   $('status-mode').textContent = mode === 'live' ? '現在位置' : `デモ：${DEMOS[mode].label}`;
-  $('status-text').textContent = inp.mark + [state.detail, inp.note].filter(Boolean).join(' ');
+  // No announcement in effect: a short instruction instead of the long
+  // explanation of modules/alert (it still never says "safe").
+  const detail = state.status === 'ok' && state.level === 0 ? '身の安全を確保してください' : state.detail;
+  $('status-text').textContent = inp.mark + [detail, inp.note].filter(Boolean).join(' ');
   $('status-line').dataset.level = frame.dataset.level;
   $('status-line').dataset.imminent = String(state.imminent);
   const shownItems = state.status === 'ok' ? state.sources : [];
   $('alert-items').replaceChildren(...(shownItems.length
     ? shownItems.map((s) => li(`${inp.mark}${s.name}（${s.area_name ?? '対象地域'}）`))
     : [li(state.status === 'ok'
-      ? '受け取っている範囲では、この地域への注意報・警報はありません。発表がないことは、安全という意味ではありません。'
+      ? '身の安全を確保してください'
       : '発表を受け取れていない、または地域を選べません。警報が出ていないという意味ではありません。')]));
   if (inp.demo) {
-    $('alert-received').textContent = `記録の時刻：${inp.replay.event.time || '（模擬のため時刻なし）'}　${inp.mark}いま出ている発表ではありません。`;
+    $('alert-received').textContent = `記録の時刻 ${recordMdHm(inp.replay.event.time) || '（模擬のため時刻なし）'}　${inp.mark}いま出ている発表ではありません。`;
   } else if (inp.received && caOkAt) {
-    $('alert-received').textContent = `受信時刻：${formatJstHm(caOkAt)}（${minutesAgoText(caOkAt, now) ?? ''}）${inp.mark}`;
+    $('alert-received').textContent = `受信 ${formatMdHm(caOkAt)}（${minutesAgoText(caOkAt, now) ?? ''}）${inp.mark}`;
   } else {
-    $('alert-received').textContent = '受信時刻：受け取れていません。警報が出ていないという意味ではありません。';
+    $('alert-received').textContent = '受信：受け取れていません。警報が出ていないという意味ではありません。';
   }
 
+  // Everything about the demo sits in one box at the very bottom.
+  const strip = $('demo-strip');
+  strip.hidden = !inp.demo;
+  strip.textContent = inp.demo ? `${inp.demo.banner}（デモ：${inp.demo.label}）` : '';
+  if (!inp.demo && inp.simulated) $('sim-banner').hidden = false;
   const demoBox = $('demo-box');
   demoBox.hidden = !inp.demo;
   if (inp.demo) {
-    $('demo-banner').textContent = inp.demo.banner;
-    $('demo-place').textContent = `位置：${inp.demo.place}`;
-    $('demo-now').textContent = [inp.replay.event.time, inp.replay.event.text].filter(Boolean).join('　');
+    $('demo-banner').hidden = true; // the strip above already says it
+    $('demo-where').textContent = `位置：${inp.demo.place}`;
+    $('demo-now').textContent = [recordMdHm(inp.replay.event.time), inp.replay.event.text].filter(Boolean).join('　');
     $('demo-inEffect').textContent = inp.replay.inEffect.length ? `出ている発表：${inp.replay.inEffect.join('、')}` : '出ている発表：なし（記録の上で）';
-    $('demo-log').replaceChildren(...inp.replay.log.map((e) => li([e.time, e.text].filter(Boolean).join('　'))).reverse());
+    $('demo-log').replaceChildren(...inp.replay.log.map((e) => li([recordMdHm(e.time), e.text].filter(Boolean).join('　'))).reverse());
     $('demo-step').textContent = `${inp.replay.index + 1} / ${inp.demo.events.length}${inp.replay.finished ? '（再生は終わりました）' : ''}`;
   }
+  $('demo-info').hidden = !inp.demo && $('sim-banner').hidden;
 
   recordAndNotify(inp, state);
 
@@ -517,17 +538,64 @@ function render() {
   const guide = $('handoff-open');
   guide.dataset.prominence = prominence;
   $('handoff-guide-note').textContent = prominence === 'high'
-    ? `${inp.mark}発災から時間がたちました（段階の目安：${stage.name}）。水・食料・電源・連絡などの困りごとを、メモにまとめて Claude や窓口に相談できます。`
-    : prominence === 'mid' ? `${inp.mark}落ち着いたら、困っていることを引き継ぎメモにまとめられます。` : '';
+    ? `${inp.mark}水・食料・電源・連絡などの困りごとを、メモにまとめて相談できます。`
+    : prominence === 'mid' ? `${inp.mark}落ち着いたら、困りごとを伝達メモにまとめられます。` : '';
   globalThis.__handoffSources = {
     ...(globalThis.__handoffSources ?? {}),
     mark: inp.mark,
     elapsedHours: hours,
     stageName: stage?.name ?? null,
-    announcements: history.list().map((e) => historyLine(e, formatJstFull)),
+    announcements: history.list().map((e) => historyLine(e, formatMdHm)),
   };
 
   tellEvacuee(inp, state);
+}
+
+// ---------------------------------------------------------------- one line above the compass
+
+// The first line (tsunami > earthquake > other) goes above the compass and
+// slides in from the right edge when it changes; the others go under it.
+let lastHeadline = '';
+let lines = [];
+function renderHeadline(inp, state) {
+  const codes = new Set([...inp.areaCodes, inp.coast?.region_code].filter(Boolean).map(String));
+  const items = state.status === 'ok' ? inp.items.filter((it) => codes.has(String(it.area_code))) : [];
+  lines = infoLines({ items, facts: state.status === 'ok' ? inp.replay?.facts ?? [] : [], levelOf, parseHeight });
+  const top = lines[0] ?? null;
+  const text = top ? top.text
+    : state.status === 'ok' ? '身の安全を確保してください'
+      : inp.received ? 'この地域の発表を選べません' : '公的な発表を受け取れていません';
+  const time = top ? top.time : '';
+  const markText = inp.demo ? (inp.demo.kind === 'record' ? '記録の再生' : '模擬') : inp.simulated ? '模擬データ' : '';
+  const card = $('headline-card');
+  card.dataset.cls = top ? top.cls : 'none';
+  card.dataset.level = top ? String(top.level ?? 'none') : state.status === 'ok' ? '0' : 'unknown';
+  $('headline-mark').hidden = !markText;
+  $('headline-mark').textContent = markText;
+  $('headline-time').textContent = time;
+  $('headline-text').textContent = text;
+  const key = `${markText}|${time}|${text}`;
+  if (key !== lastHeadline) {
+    lastHeadline = key;
+    const h = $('headline');
+    h.classList.remove('slide-in');
+    void h.offsetWidth; // restart the animation
+    h.classList.add('slide-in');
+  }
+  const rest = lines.slice(1);
+  $('info-more-card').hidden = rest.length === 0;
+  $('info-more').replaceChildren(...rest.map((l) => {
+    const e = document.createElement('li');
+    e.dataset.cls = l.cls;
+    e.dataset.level = String(l.level ?? 'none');
+    if (l.time) {
+      const t = document.createElement('time');
+      t.textContent = l.time;
+      e.append(t);
+    }
+    e.append(l.text);
+    return e;
+  }));
 }
 
 // ---------------------------------------------------------------- static menu parts
@@ -606,7 +674,15 @@ globalThis.__shell = {
   get state() { return current; },
   get pane() { return pane; },
   get notices() { return notices.slice(); },
+  get lines() { return lines.slice(); },
   setMode,
+  // jump to a step of the demo replay (index of the event)
+  seekDemo(i) {
+    if (mode === 'live') return;
+    const d = DEMOS[mode];
+    demoStart = Date.now() - i * (STEP_MS ?? d.stepMs) - 1;
+    render();
+  },
   showPane,
   pollCa,
   history,

@@ -5,25 +5,27 @@
 // Privacy: the position stays in this page. The only requests are for the
 // page's own files and the evacuation data file on the same site.
 
-import { evacViewModel, parseSimParam, scenarioFromSimKey, receptionLine, arrowLabel, SHOCK_TEXT, SCENARIOS } from './model.js';
-import { heightsView, mapRouteUrl, ELEVATION_SOURCE } from '../shell/heights.js';
+import { evacViewModel, parseSimParam, scenarioFromSimKey, receptionLine, arrowLabel, facingText, SHOCK_TEXT, SCENARIOS } from './model.js';
+import { heightsView, mapRouteUrl, elevationShort, ELEVATION_SOURCE } from '../shell/heights.js';
 
 const $ = (id) => document.getElementById(id);
 const SVG = 'http://www.w3.org/2000/svg';
-const REFRESH_MS = 250;
+// The compass (the direction the device faces) is redrawn once a second.
+const REFRESH_MS = 1000;
 
 // ---------------------------------------------------------------- view switch
 
-// Default is the evacuee view. It never switches by itself.
+// Default is the evacuee view. It never switches by itself. Two radio
+// buttons in the menu; the choice applies at once.
 function showView(name) {
   const evac = name !== 'support';
   $('view-evac').hidden = !evac;
   $('view-support').hidden = evac;
-  $('tab-evac').setAttribute('aria-pressed', String(evac));
-  $('tab-support').setAttribute('aria-pressed', String(!evac));
+  $('tab-evac').checked = evac;
+  $('tab-support').checked = !evac;
 }
-$('tab-evac').addEventListener('click', () => showView('evac'));
-$('tab-support').addEventListener('click', () => showView('support'));
+$('tab-evac').addEventListener('change', () => { if ($('tab-evac').checked) showView('evac'); });
+$('tab-support').addEventListener('change', () => { if ($('tab-support').checked) showView('support'); });
 showView('evac');
 
 // ---------------------------------------------------------------- modules
@@ -148,33 +150,99 @@ function svg(tag, attrs) {
   return e;
 }
 
-// Large arrow pointing to the top of the screen, rotated by `deg`.
-function drawArrow(deg) {
-  const s = svg('svg', { viewBox: '-100 -100 200 200', class: 'evac-arrow-svg', role: 'img', 'aria-label': arrowLabel(deg) });
-  const g = svg('g', { transform: `rotate(${deg})` });
-  g.append(svg('path', { d: 'M0,-88 L46,-20 L16,-20 L16,80 L-16,80 L-16,-20 L-46,-20 Z', class: 'evac-arrow-shape' }));
-  s.append(g);
-  return s;
+// ---------------------------------------------------------------- compass
+//
+// One figure, built once and kept in place (it never moves when texts
+// change). Heading up: a large upward arrow, fixed, is the direction the
+// device faces; the dial (north, east, south, west) and the evacuation
+// target turn around it.
+// - heading up with a target (the module accepted the heading): the dial
+//   turns so that the top of the screen is the direction faced, and the
+//   target mark sits on the rim in the target's direction on the screen.
+// - heading up without a target: a compass (the dial turns).
+// - a target without an accepted heading: heading up would draw the target
+//   from a heading we could not check, so the dial stays north-up, the
+//   target is a dot with a dashed line and there is no upward arrow (the
+//   arrow would claim a direction faced). The direction faced, if known, is
+//   an outlined mark on the rim.
+// - no heading and no target: a north-up dial.
+
+// Angles accumulate so that a turn from 359° to 1° goes the short way.
+function nearAngle(prev, next) {
+  if (!Number.isFinite(prev)) return next;
+  const delta = ((((next - prev) % 360) + 540) % 360) - 180;
+  return prev + delta;
 }
 
-// North-up figure: not tied to how the device is held.
-function drawNorthUp(bearing) {
-  const s = svg('svg', { viewBox: '-100 -100 200 200', class: 'evac-north-svg', role: 'img', 'aria-label': `北を上にした図。避難場所は北から約 ${Math.round(bearing)} 度の方向` });
-  s.append(svg('circle', { cx: 0, cy: 0, r: 80, class: 'evac-ring' }));
-  for (const [t, x, y] of [['北', 0, -84], ['東', 86, 6], ['南', 0, 98], ['西', -86, 6]]) {
-    const tx = svg('text', { x, y, 'text-anchor': 'middle', class: t === '北' ? 'evac-n' : 'evac-dir' });
-    tx.textContent = t;
-    s.append(tx);
+const compass = (() => {
+  const s = svg('svg', { viewBox: '-120 -120 240 240', class: 'compass-svg', role: 'img', 'aria-label': '方位の図' });
+  const dial = svg('g', { class: 'c-dial' });
+  dial.append(svg('circle', { cx: 0, cy: 0, r: 100, class: 'c-face' }));
+  for (let a = 0; a < 360; a += 30) {
+    const major = a % 90 === 0;
+    dial.append(svg('line', { x1: 0, y1: -100, x2: 0, y2: major ? -86 : -92, class: major ? 'c-tick c-tick-major' : 'c-tick', transform: `rotate(${a})` }));
   }
-  // A dot on the dial and a dashed line, deliberately NOT an arrow: this
-  // figure does not turn with the device.
-  const g = svg('g', { transform: `rotate(${bearing})` });
-  g.append(svg('line', { x1: 0, y1: 0, x2: 0, y2: -80, class: 'evac-bearing' }));
-  g.append(svg('circle', { cx: 0, cy: -80, r: 11, class: 'evac-bearing-dot' }));
-  s.append(g);
-  s.append(svg('circle', { cx: 0, cy: 0, r: 4, class: 'evac-center' }));
-  return s;
-}
+  // Labels stay upright whichever way the dial turns.
+  const labels = [];
+  for (const [label, a] of [['北', 0], ['東', 90], ['南', 180], ['西', 270]]) {
+    const g = svg('g', { transform: `rotate(${a})` });
+    const tx = svg('text', { x: 0, y: -70, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: label === '北' ? 'c-n c-label' : 'c-dir c-label' });
+    tx.textContent = label;
+    g.append(tx);
+    dial.append(g);
+    labels.push([tx, a]);
+  }
+  // North-up figure: the target as a dot with a dashed line (never an arrow).
+  const dot = svg('g', { class: 'c-target' });
+  dot.append(svg('line', { x1: 0, y1: 0, x2: 0, y2: -100, class: 'evac-bearing' }));
+  dot.append(svg('circle', { cx: 0, cy: -100, r: 12, class: 'evac-bearing-dot' }));
+  dial.append(dot);
+  // North-up figure: the direction faced, an outlined mark on the rim.
+  const facingRim = svg('path', { d: 'M0,-118 L10,-104 L-10,-104 Z', class: 'c-facing-unconfirmed' });
+  dial.append(facingRim);
+  s.append(dial);
+  // Heading up: the target on the rim, in its direction on the screen.
+  const target = svg('g', { class: 'c-target-up' });
+  target.append(svg('line', { x1: 0, y1: -30, x2: 0, y2: -92, class: 'c-target-line' }));
+  target.append(svg('circle', { cx: 0, cy: -102, r: 15, class: 'evac-bearing-dot c-target-dot' }));
+  const flag = svg('text', { x: 0, y: -102, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'c-target-label' });
+  flag.textContent = '避';
+  target.append(flag);
+  s.append(target);
+  // Heading up: the fixed upward arrow = the direction the device faces.
+  const up = svg('g', { class: 'c-up' });
+  up.append(svg('path', { d: 'M0,-58 L26,-14 L9,-14 L9,40 L-9,40 L-9,-14 L-26,-14 Z', class: 'evac-arrow-shape' }));
+  s.append(up);
+  s.append(svg('circle', { cx: 0, cy: 0, r: 5, class: 'evac-center' }));
+  const st = { dial: null, dot: null, rim: null, target: null };
+  const turn = (el, key, deg) => {
+    st[key] = nearAngle(st[key], deg);
+    el.style.transform = `rotate(${st[key]}deg)`;
+  };
+  return {
+    el: s,
+    // view: { kind: 'arrow' | 'north-up' | 'none', headingUp, dialDeg, targetDeg, arrowDeg, facingDeg, label }
+    set(v) {
+      turn(dial, 'dial', v.dialDeg);
+      for (const [tx, a] of labels) tx.style.transform = `rotate(${-(st.dial + a)}deg)`;
+      flag.style.transform = `rotate(${-(st.target ?? 0)}deg)`;
+      dot.style.display = v.kind === 'north-up' ? '' : 'none';
+      if (v.kind === 'north-up') turn(dot, 'dot', v.targetDeg);
+      target.style.display = v.kind === 'arrow' ? '' : 'none';
+      if (v.kind === 'arrow') {
+        turn(target, 'target', v.arrowDeg);
+        flag.style.transform = `rotate(${-st.target}deg)`;
+      }
+      up.style.display = v.headingUp ? '' : 'none';
+      const rim = !v.headingUp && Number.isFinite(v.facingDeg);
+      facingRim.style.display = rim ? '' : 'none';
+      if (rim) turn(facingRim, 'rim', v.facingDeg);
+      s.dataset.orientation = v.headingUp ? 'heading-up' : 'north-up';
+      s.setAttribute('aria-label', v.label);
+    },
+  };
+})();
+$('evac-figure').replaceChildren(compass.el);
 
 function setText(id, t) {
   const e = $(id);
@@ -194,13 +262,16 @@ function render() {
     : locSensor ? locSensor.read() : null;
   current = null;
   const hazard = ctx ? ctx.def?.hazard ?? null : scenario ? SCENARIOS[scenario].hazard : null;
+  // The direction the device faces. Without a position, the magnetic
+  // declination of central Japan is used for this readout only.
+  const here = loc?.status === 'ok' ? loc.value : { latitude: 36, longitude: 138 };
+  const heading = tracker ? tracker.read({
+    nowMs: now,
+    screenAngleDeg: E.currentScreenAngle(),
+    declinationWestDeg: E.declinationWestDeg(here.latitude, here.longitude),
+  }) : null;
   if (hazard && data && loc?.status === 'ok' && !(ctx && ctx.hasEvacData === false)) {
     const v = loc.value;
-    const heading = tracker.read({
-      nowMs: now,
-      screenAngleDeg: E.currentScreenAngle(),
-      declinationWestDeg: E.declinationWestDeg(v.latitude, v.longitude),
-    });
     const fixAt = Date.parse(loc.observed_at);
     const course = { heading_deg: v.heading_deg, speed_mps: v.speed_mps, at_ms: fixAt };
     compassCheck.update(heading, E.courseFrom(course, now), now);
@@ -221,32 +292,47 @@ function render() {
   const m = evacViewModel({ scenario, lifted, context: ctx, location: loc, dataError, result: current, nowMs: now });
 
   $('view-evac').dataset.mode = m.mode;
-  setText('evac-instruction', m.instruction);
+  // The line above the compass (from the shell) carries the announcement;
+  // the quoted instruction is shown only for the built-in simulation.
+  setText('evac-instruction', ctx ? '' : m.instruction);
   setText('evac-instruction-origin', m.instructionOrigin);
   setText('evac-message', m.message);
 
   const fig = $('evac-figure');
+  const resultFacing = current?.status === 'ok' ? current.value.heading.true_heading_deg : null;
+  const facing = Number.isFinite(resultFacing) ? resultFacing
+    : heading?.status === 'ok' ? heading.value.true_heading_deg : null;
   if (m.mode === 'arrow') {
-    fig.replaceChildren(drawArrow(m.arrowDeg));
+    compass.set({ kind: 'arrow', headingUp: true, dialDeg: -facing, arrowDeg: m.arrowDeg, facingDeg: facing,
+      label: `上の矢印が向いている方角（${facingText(facing)}）。避難場所は${arrowLabel(m.arrowDeg)}` });
     fig.dataset.kind = 'arrow';
     fig.dataset.deg = String(m.arrowDeg);
   } else if (m.mode === 'text' && m.northUpBearing !== null) {
-    fig.replaceChildren(drawNorthUp(m.northUpBearing));
+    compass.set({ kind: 'north-up', headingUp: false, dialDeg: 0, targetDeg: m.northUpBearing, facingDeg: facing,
+      label: `北を上にした図。避難場所は北から約 ${Math.round(m.northUpBearing)} 度の方向` });
     fig.dataset.kind = 'north-up';
     fig.dataset.deg = String(m.northUpBearing);
   } else {
-    fig.replaceChildren();
+    const headingUp = Number.isFinite(facing);
+    compass.set({ kind: 'none', headingUp, dialDeg: headingUp ? -facing : 0, facingDeg: facing,
+      label: headingUp ? `上の矢印が向いている方角（${facingText(facing)}）` : '北を上にした方位の図。向いている方角が分かりません' });
     fig.dataset.kind = 'none';
     delete fig.dataset.deg;
   }
-  setText('evac-figure-caption', m.mode === 'text' && m.northUpBearing !== null ? '北を上にした図です。端末の向きとは関係ありません。' : '');
+  $('facing').textContent = Number.isFinite(facing) ? facingText(facing) : orientation ? '分かりません' : '—';
+  setText('evac-figure-caption', m.mode === 'text' && m.northUpBearing !== null ? '避難目標が出ているときに向きを確かめられないと、北を上にした図にします（点と点線が避難場所の方向です）。' : '');
   setText('evac-arrow-reason', m.arrowReason);
 
   const p = m.primary;
   setText('evac-name', p ? p.name : '');
   setText('evac-muni', p ? p.municipality : '');
-  setText('evac-distance', p ? p.distance : '');
-  setText('evac-direction', p ? p.direction : '');
+  $('evac-none').hidden = Boolean(p);
+  $('evac-straight').hidden = !p;
+  $('evac-direction-lead').hidden = !p;
+  // Short under the compass ("北北西"); the whole sentence is in the fold.
+  setText('evac-distance', p ? p.distance.replace(/^直線で/, '') : '');
+  setText('evac-direction', p ? (/（([^）]+)）/.exec(p.direction)?.[1] ?? p.direction) : '');
+  setText('evac-direction-full', p ? `${p.distance}。${p.direction}` : '');
   setText('evac-hazards', p ? p.hazards : '');
   setText('evac-remarks', p ? p.remarks : '');
   setText('evac-course', [m.courseText, p?.courseRel].filter(Boolean).join(' '));
@@ -277,10 +363,14 @@ function render() {
     return li;
   }));
   $('evac-others-wrap').hidden = m.others.length === 0;
+  $('evac-others-summary').textContent = `ほかの候補（${m.others.length} か所）`;
 
   $('evac-fallback').hidden = !m.showFallback;
   $('evac-reception').textContent = receptionLine(reception, now);
-  if (simulated) $('sim-banner').hidden = false;
+  if (simulated) {
+    $('sim-banner').hidden = false;
+    $('demo-info').hidden = false;
+  }
   renderHeights(m);
 }
 
@@ -305,12 +395,18 @@ function renderHeights(m) {
   const ctx = context;
   const view = heightsView({
     forecast: ctx?.forecast ?? null,
+    observed: ctx?.observed ?? null,
     here: ctx?.here ?? { status: 'none' },
     site,
     siteName: c?.name ?? '',
     mark: ctx?.mark ?? '',
     received: ctx ? ctx.received !== false : false,
   });
+  // Always under the compass: the elevation here, short.
+  const hereRow = view.rows.find((r) => r.key === 'here');
+  $('here-elev').textContent = elevationShort(ctx?.here ?? { status: 'none' });
+  $('here-warn').hidden = !hereRow?.warn;
+  $('here-warn').textContent = hereRow?.warn ? `⚠️${hereRow.warnText}` : '';
   const dl = $('heights-rows');
   dl.replaceChildren(...view.rows.flatMap((r) => {
     const dt = document.createElement('dt');
@@ -322,7 +418,7 @@ function renderHeights(m) {
     if (r.warn) {
       const w = document.createElement('span');
       w.className = 'warn';
-      w.textContent = `⚠ ${r.warnText}`;
+      w.textContent = `⚠️${r.warnText}`;
       dd.append(w);
     }
     return [dt, dd];
@@ -330,7 +426,7 @@ function renderHeights(m) {
   const srcs = [ELEVATION_SOURCE];
   if (view.siteNote) srcs.push(view.siteNote.replace(/。$/, ''));
   if (ctx?.here?.status === 'ok' && ctx.here.source) srcs.push(`いる場所：${ctx.here.source}`);
-  srcs.push('予想される津波の高さ：気象庁の発表（デモでは記録・模擬の値）');
+  srcs.push('予想・観測された津波の高さ：気象庁の発表（デモでは記録・模擬の値）。⚠️は予想と実測の高いほうと比べています');
   $('heights-source').textContent = `${srcs.join('。')}。`;
   const url = mapRouteUrl(coords);
   $('evac-map-wrap').hidden = !url || m.mode === 'message';
@@ -355,7 +451,7 @@ function fillStatic() {
       a.rel = 'noopener noreferrer';
       a.target = '_blank';
       a.textContent = l.label;
-      li.append(a, `（${l.kind === 'public' ? '公的' : '民間'}）${l.note}`);
+      li.append(a); // site name and link only
       return li;
     }));
   }

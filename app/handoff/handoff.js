@@ -16,7 +16,7 @@ export const STORAGE_NOTE = 'この下書きはこの端末に保存されます
 // For people without the Skill: paste this memo into Claude as it is.
 export const INSTRUCTION = [
   '> **Claude へのお願い（このメモを貼り付けた人へ：この部分は消さずに渡してください）**',
-  '> このメモは、防災アプリ「緊急支援モード」が作った引き継ぎメモの下書きです。',
+  '> このメモは、防災アプリ「緊急支援モード」が作った伝達メモの下書きです。',
   '> 次のように手伝ってください。',
   '> - 一度に一つずつ、短い質問で、被災の状況・困っていること・体や気持ちの不調の内容を聞き取ってください。答えられない質問は飛ばしてください。',
   '> - 聞き取った内容を、医師・保健師・自治体の窓口などの専門家に見せられる Markdown にまとめてください。',
@@ -86,7 +86,7 @@ export function buildAuto(v) {
   if (v.site) L.push(`- ${v.site.name}${v.site.municipality ? `（${v.site.municipality}）` : ''}${v.site.distance ? `、${v.site.distance}` : ''}`);
   else L.push('- 記録がありません');
   L.push('', '### 標高と予想される津波の高さ');
-  if (v.heights?.length) for (const h of v.heights) L.push(`- ${h.label}：${h.text}${h.warnText ? `（⚠ ${h.warnText}）` : ''}`);
+  if (v.heights?.length) for (const h of v.heights) L.push(`- ${h.label}：${h.text}${h.warnText ? `（⚠️${h.warnText}）` : ''}`);
   else L.push('- 記録がありません');
   if (v.terrainNote) L.push(`- ${v.terrainNote}`);
   L.push('', '### 端末の状態');
@@ -111,7 +111,7 @@ export function manualTemplate() {
 }
 
 export function newDraft(auto) {
-  return ['# 引き継ぎメモ（緊急支援モード）', '', INSTRUCTION, '', auto, '', manualTemplate(), ''].join('\n');
+  return ['# 伝達メモ（緊急支援モード）', '', INSTRUCTION, '', auto, '', manualTemplate(), ''].join('\n');
 }
 
 // Replace the automatic part of a draft; if the markers are gone, put the

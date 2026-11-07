@@ -56,7 +56,7 @@ test('view: no scenario -> no site, fallback shown', () => {
   assert.equal(m.mode, 'message');
   assert.equal(m.primary, null);
   assert.equal(m.showFallback, true);
-  assert.match(m.message, /公的な発表を受けていない/);
+  assert.match(m.message, /発表を受けていないため、避難目標は出していません/);
   assert.equal(m.straightLineNote, STRAIGHT_LINE_NOTE);
 });
 
@@ -160,4 +160,14 @@ test('view: a non-finite arrow angle is never drawn', () => {
   const fake = JSON.parse(JSON.stringify(r));
   fake.value.candidates[0].arrow_deg = NaN;
   assert.equal(evacViewModel({ scenario: 'tsunami', location: LOC, result: fake, nowMs: NOW }).mode, 'text');
+});
+
+test('facingText: 8 directions and degrees', async () => {
+  const { facingText } = await import('../evac/model.js');
+  assert.equal(facingText(0), '北 0°');
+  assert.equal(facingText(44.6), '北東 45°');
+  assert.equal(facingText(359.7), '北 0°');
+  assert.equal(facingText(200), '南 200°');
+  assert.equal(facingText(225), '南西 225°');
+  assert.equal(facingText(null), '');
 });

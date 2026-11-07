@@ -53,7 +53,7 @@ test('heights: the terrain note is always there; never "safe"', () => {
     heightsView({ forecast: { text: '1m', value_m: 1, unbounded: false, area: 'A' }, here: { status: 'ok', value_m: 30 } }),
   ];
   for (const v of cases) {
-    assert.equal(v.note, '地形によって津波は予想より高くなる可能性があります。');
+    assert.equal(v.note, '津波は予想より高くなる場合あり。');
     assert.doesNotMatch(JSON.stringify(v), SAFE_CLAIM);
   }
   // high ground and a bounded forecast: no warning, and still no reassurance
@@ -89,9 +89,11 @@ test('forecast height: from C-A items or the demo, for the nearest coast region 
   assert.equal(st.items[0].report_ms, 1000);
 });
 
-test('demos: Fukushima and Shizuoka heights 3m -> 6m -> 10m以上; looked-up elevation and inundation', async () => {
+test('demos: Fukushima 3m -> 6m -> 10m以上, Shizuoka 0.8m -> 2m -> 5m -> 10m以上; looked-up elevation and inundation', async () => {
   const heightsOf = (d) => d.events.map((_, i) => replayState(d, i * d.stepMs).items[0]?.max_height?.description ?? '-');
-  assert.deepEqual(heightsOf(DEMOS.shizuoka), ['3m', '6m', '10m以上', '1m', '-']);
+  assert.deepEqual(heightsOf(DEMOS.shizuoka), ['-', '0.8m', '2m', '5m', '10m以上', '1m', '-']);
+  // the simulated earthquake comes first
+  assert.equal(replayState(DEMOS.shizuoka, 0).facts[0].maxInt, '6弱');
   assert.deepEqual(heightsOf(DEMOS.fukushima).slice(2, 5), ['3m', '6m', '10m以上']);
   for (const e of DEMOS.shizuoka.events) assert.match(e.text, /模擬/);
   for (const id of DEMO_IDS) {
@@ -121,7 +123,7 @@ test('demo elapsed hours: recorded times, simulated hours', () => {
   const last = replayState(f, 100 * f.stepMs);
   assert.ok(demoElapsedHours(f, last) > 50);
   const s = DEMOS.shizuoka;
-  assert.equal(demoElapsedHours(s, replayState(s, 0)), 0.05);
+  assert.equal(demoElapsedHours(s, replayState(s, s.stepMs)), 0.05);
 });
 
 test('history: dedup by id, kept in storage, cleared; disaster start', () => {
@@ -185,14 +187,14 @@ test('handoff: draft with instruction, auto part between markers, no coordinates
     mark: '【模擬】',
     announcements: ['2026-11-07 17:00 【模擬】津波警報（静岡県） 予想される津波の高さ 3m'],
     site: { name: '仮の避難場所', municipality: '焼津市', distance: '直線で約 280 m' },
-    heights: [{ label: 'いる場所の標高', text: '約 1.4 m', warnText: '予想の高さ以下です' }],
+    heights: [{ label: 'いる場所の標高', text: '約 1.4 m', warnText: '津波よりも下にいます' }],
     terrainNote: TERRAIN_NOTE,
     battery: '残量 40%',
     network: 'オンライン',
   });
   assert.ok(auto.startsWith(AUTO_START) && auto.endsWith(AUTO_END));
   assert.match(auto, /約 30 時間/);
-  assert.match(auto, /⚠ 予想の高さ以下です/);
+  assert.match(auto, /⚠️津波よりも下にいます/);
   assert.match(auto, /デモの内容です/);
   assert.match(auto, /位置の座標は入れていません/);
   assert.doesNotMatch(auto, /\d+\.\d{4,}/); // no coordinates

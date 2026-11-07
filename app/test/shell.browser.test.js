@@ -107,7 +107,8 @@ const shell = (page) => page.evaluate(() => {
     frameLevel: f.dataset.level, animation: cs.animationName, frameWidth: cs.borderTopWidth,
     frameColorVar: f.style.getPropertyValue('--frame-color'),
     // the current alert text lives in the second pane (hidden by default)
-    text: `${document.body.innerText}\n${document.getElementById('pane-alert').textContent}`,
+    // (and small texts are folded since the redesign)
+    text: `${document.body.innerText}\n${document.getElementById('pane-alert').textContent}\n${document.getElementById('view-evac').textContent}\n${document.getElementById('demo-info').textContent}`,
   };
 });
 
@@ -146,9 +147,14 @@ test('menu: 8 items in order, demo place and ON/OFF toggle, no theme switch', { 
   const items = await page.$$eval('#menu-panel > details.menu-item > summary', (els) => els.map((e) => e.textContent.trim()));
   assert.deepEqual(items, ['事前情報収集', '避難者／支援者の切り替え', 'これまでの情報履歴', '記録の出典', '公的機関のウェブサイトリンク', '公的機関の連絡先', '独自情報の情報取得URL', 'デモモード']);
   assert.equal(await page.locator('[data-theme-choice]').count(), 0);
+  // fold state is shown with a triangle at the start of each item
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#menu-demo > summary'), '::before').content), '"▶"');
   await page.click('#menu-demo summary');
-  assert.equal(await page.locator('[data-demo-place]').count(), 4);
-  await page.click('[data-demo-place="tokyo"]');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#menu-demo > summary'), '::before').content), '"▼"');
+  // place: a drop-down list; ON/OFF: a toggle switch
+  assert.equal(await page.locator('#demo-place option').count(), 4);
+  assert.equal(await page.getAttribute('#demo-toggle', 'role'), 'switch');
+  await page.selectOption('#demo-place', 'tokyo');
   assert.equal((await shell(page)).mode, 'live'); // choosing a place alone does not start the demo
   await page.click('#demo-toggle');
   assert.equal(await page.isVisible('#menu-panel'), false);
@@ -158,7 +164,7 @@ test('menu: 8 items in order, demo place and ON/OFF toggle, no theme switch', { 
   assert.match(s.text, /いま出ている発表ではありません/);
   assert.equal(await page.isVisible('#demo-strip'), true);
   await page.click('#menu-button');
-  assert.equal(await page.getAttribute('#demo-toggle', 'aria-pressed'), 'true');
+  assert.equal(await page.isChecked('#demo-toggle'), true);
   await page.click('#demo-toggle');
   s = await shell(page);
   assert.equal(s.mode, 'live');
@@ -218,6 +224,7 @@ test('Chiba record: warnings are red, the sediment disaster alert is purple, ste
 
 test('Shizuoka simulated: the evacuee view shows a site from the demo point', { skip }, async (t) => {
   const { page } = await open(t, { query: '?demo=shizuoka&demostep=60000' });
+  await page.evaluate(() => globalThis.__shell.seekDemo(2)); // 津波警報 2m (simulated)
   await page.waitForFunction(() => globalThis.__evac.result?.status === 'ok', null, { timeout: 5000 });
   const s = await shell(page);
   assert.equal(s.imminent, true);
@@ -225,7 +232,7 @@ test('Shizuoka simulated: the evacuee view shows a site from the demo point', { 
   const r = await page.evaluate(() => globalThis.__evac.result);
   assert.equal(r.source, 'simulated');
   assert.ok(r.value.candidates[0].hazards.includes('津波'));
-  assert.match(s.text, /【模擬】津波警報（模擬・静岡県）/);
+  assert.match(await page.textContent('#headline'), /^模擬05:20津波警報 2m、静岡県、予想$/);
   await shot(page, 'shell-shizuoka');
 });
 
@@ -234,12 +241,12 @@ test('current location with C-A: official major tsunami warning near the coast',
   const { page, requests } = await open(t, { server: baseCa, geo: YAIZU_POINT });
   await page.click('#evac-start');
   await page.waitForFunction(() => globalThis.__shell.state.state.imminent === true, null, { timeout: 8000 });
-  await page.waitForFunction(() => /気象庁の発表：大津波警報/.test(document.getElementById('view-evac').innerText), null, { timeout: 2000 });
+  await page.waitForFunction(() => /大津波警報 ５ｍ、静岡県、予想/.test(document.getElementById('headline').textContent), null, { timeout: 2000 });
+  await page.waitForFunction(() => /公的情報の受信：1 分以内/.test(document.getElementById('evac-reception').textContent), null, { timeout: 3000 });
   const s = await shell(page);
   assert.equal(s.level, 5);
   assert.match(s.text, /公的情報の受信：1 分以内/);
   assert.equal(s.animation, 'frame-hard');
-  assert.match(s.text, /気象庁の発表：大津波警報（静岡県）/);
   // no consent and no inundation data: the distance guide, labelled as such
   assert.equal(s.basis, 'distance');
   assert.match(s.text, /このアプリの目安です。公的な基準ではありません/);
@@ -274,12 +281,13 @@ test('consent: one consent; then the inundation estimate decides; withdrawing st
   await page.waitForFunction(() => globalThis.__shell.state.state.level === 5, null, { timeout: 8000 });
   assert.equal((await shell(page)).imminent, false);
   assert.ok(!requests.some((u) => /34\.97|138\.38/.test(u)));
-  assert.match(await page.textContent('#heights'), /同意していないため/);
+  // the evacuee view redraws once a second
+  await page.waitForFunction(() => /同意していないため/.test(document.getElementById('heights').textContent), null, { timeout: 3000 });
   await page.click('#menu-button');
   await page.click('#menu-prefetch summary');
   assert.match(await page.textContent('#consent-text'), /国土地理院の標高 API/);
   assert.match(await page.textContent('#consent-stop'), /同意をやめる/);
-  await page.click('#consent-toggle');
+  await page.check('#consent-yes'); // radio buttons; applies at once
   await page.waitForFunction(() => globalThis.__shell.state.state.imminent === true, null, { timeout: 8000 });
   assert.equal((await shell(page)).basis, 'inundation');
   await page.waitForFunction(() => /約 2\.5 m/.test(document.getElementById('heights').textContent), null, { timeout: 3000 });
@@ -287,7 +295,7 @@ test('consent: one consent; then the inundation estimate decides; withdrawing st
   assert.ok(requests.some((u) => u.includes('disaportaldata')));
   assert.ok(await page.evaluate(() => localStorage.getItem('bw-consent-position-lookup') !== null));
   // withdraw
-  await page.click('#consent-toggle');
+  await page.check('#consent-no');
   const n = requests.length;
   await page.waitForTimeout(800);
   assert.equal((await shell(page)).imminent, false);
@@ -382,6 +390,7 @@ for (const width of [375, 1200]) {
 
 test('panes: edge buttons and a swipe in the middle switch; a swipe from the edge does not', { skip }, async (t) => {
   const { page } = await open(t, { hasTouch: true, query: '?demo=shizuoka&demostep=60000' });
+  await page.evaluate(() => globalThis.__shell.seekDemo(2));
   const pane = () => page.evaluate(() => globalThis.__shell.pane);
   await page.waitForFunction(() => globalThis.__shell.state.state.level === 3, null, { timeout: 5000 });
   assert.equal(await pane(), 'main');
@@ -413,17 +422,17 @@ test('panes: edge buttons and a swipe in the middle switch; a swipe from the edg
 test('notices: new information at the top, read aloud, stays until closed; history kept and deletable', { skip }, async (t) => {
   const { page } = await open(t, { query: '?demo=shizuoka&demostep=800' });
   await page.waitForSelector('#notices .notice');
-  assert.match(await page.textContent('#notices .notice'), /新しい情報：【模擬】津波警報（静岡県） 予想される津波の高さ 3m/);
+  assert.match(await page.textContent('#notices .notice'), /新しい情報：【模擬】津波注意報（静岡県） 予想される津波の高さ 0\.8m/);
   assert.equal(await page.getAttribute('#notices .notice', 'role'), 'alert');
   // a newer notice about the same area replaces the older one; nothing disappears by itself
-  await page.waitForFunction(() => /10m以上/.test(document.getElementById('notices').textContent), null, { timeout: 5000 });
+  await page.waitForFunction(() => /10m以上/.test(document.getElementById('notices').textContent), null, { timeout: 8000 });
   await page.waitForTimeout(1500);
   assert.ok(await page.locator('#notices .notice').count() >= 1);
   await page.click('#notices .notice button');
   // history in the menu, kept on this device
   await page.click('#menu-button');
   await page.click('#menu-history summary');
-  assert.match(await page.textContent('#history-list'), /【模擬】大津波警報（静岡県） 予想される津波の高さ 6m/);
+  assert.match(await page.textContent('#history-list'), /【模擬】大津波警報（静岡県） 予想される津波の高さ 5m/);
   assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('bw-history')).length >= 3));
   await page.click('#history-clear');
   assert.equal(await page.evaluate(() => localStorage.getItem('bw-history')), null);
@@ -432,13 +441,14 @@ test('notices: new information at the top, read aloud, stays until closed; histo
 
 test('heights: forecast, elevation, warning marks, terrain note always; map link with the site only', { skip }, async (t) => {
   const { page } = await open(t, { query: '?demo=shizuoka&demostep=60000' });
+  await page.evaluate(() => globalThis.__shell.seekDemo(2)); // 津波警報 2m (simulated)
   await page.waitForFunction(() => globalThis.__evac.result?.status === 'ok', null, { timeout: 5000 });
   await page.waitForFunction(() => /地面の標高/.test(document.getElementById('heights').textContent)
-    && /3m（津波警報/.test(document.getElementById('heights').textContent), null, { timeout: 5000 });
+    && /2m（津波警報/.test(document.getElementById('heights').textContent), null, { timeout: 5000 });
   const h = await page.textContent('#heights');
-  assert.match(h, /予想される津波の高さ3m（津波警報・静岡県）【模擬】/);
-  assert.match(h, /いる場所の標高約 1\.4 m⚠ 予想の高さ以下です/);
-  assert.match(h, /地形によって津波は予想より高くなる可能性があります。/);
+  assert.match(h, /予想される津波の高さ2m（津波警報・静岡県）【模擬】/);
+  assert.match(h, /いる場所の標高約 1\.4 m⚠️津波よりも下にいます/);
+  assert.match(h, /津波は予想より高くなる場合あり。/);
   assert.match(h, /タワーやビルの上の階の高さは含みません/);
   assert.doesNotMatch(h, /安全です|安全な場所|大丈夫|安心/);
   const href = await page.getAttribute('#evac-map-link', 'href');

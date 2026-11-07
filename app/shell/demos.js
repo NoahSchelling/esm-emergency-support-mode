@@ -10,13 +10,18 @@
 // it is when `set` is absent: information such as observations). A tsunami
 // kind may carry `height`: the forecast tsunami height of the region, as
 // recorded (Fukushima) or simulated (Shizuoka). `unbounded` marks a value
-// with no upper limit ("10m以上").
+// with no upper limit ("10m以上"). `info` carries recorded facts that are
+// not kinds in effect (earthquake, observed tsunami heights), for the
+// one-line texts of the main screen (./infolines.js).
 //
 // Each place carries `lookup`: the elevation (GSI elevation API) and whether
 // the point is inside the national tsunami inundation estimate (hazard map
 // portal tiles), looked up in advance on `checked` so the demos never send a
 // position anywhere.
 
+const H08 = Object.freeze({ text: '0.8m', value_m: 0.8, unbounded: false });
+const H2 = Object.freeze({ text: '2m', value_m: 2, unbounded: false });
+const H5 = Object.freeze({ text: '5m', value_m: 5, unbounded: false });
 const H3 = Object.freeze({ text: '3m', value_m: 3, unbounded: false });
 const H6 = Object.freeze({ text: '6m', value_m: 6, unbounded: false });
 const H10 = Object.freeze({ text: '10m以上', value_m: 10, unbounded: true });
@@ -42,12 +47,17 @@ export const DEMOS = Object.freeze({
     sources: [],
     // Simulated hours since the (simulated) disaster, so the replay can show
     // how the handoff guide grows with the stages of modules/mode.
+    // Simulated scenario (2026-11-08, from the person's request): an
+    // earthquake in Suruga Bay, then the forecast height rises
+    // 0.8m -> 2m -> 5m -> 10m以上. Times are simulated (no date).
     events: [
-      { time: '', simHours: 0.05, text: '【模擬】静岡県に津波警報（模擬）が出たという想定です。予想される津波の高さ 3m（模擬）。', set: [{ name: '津波警報', area: '静岡県', region: '380', height: H3 }] },
-      { time: '', simHours: 0.3, text: '【模擬】静岡県の津波警報（模擬）が大津波警報（模擬）に切り替わったという想定です。予想される津波の高さ 6m（模擬）。', set: [{ name: '大津波警報', area: '静岡県', region: '380', height: H6 }] },
-      { time: '', simHours: 0.6, text: '【模擬】静岡県の大津波警報（模擬）の予想される津波の高さが 10m以上（模擬）に上がったという想定です。', set: [{ name: '大津波警報', area: '静岡県', region: '380', height: H10 }] },
-      { time: '', simHours: 9, text: '【模擬】静岡県の大津波警報（模擬）が津波注意報（模擬）に切り替わったという想定です。', set: [{ name: '津波注意報', area: '静岡県', region: '380', height: H1 }] },
-      { time: '', simHours: 30, text: '【模擬】静岡県の津波注意報（模擬）が解除されたという想定です。', set: [] },
+      { time: '05:07', simHours: 0, text: '【模擬】地震が発生したという想定です。駿河湾、最大震度6弱、M6.5、深さ20km（模擬）。', info: [{ type: 'quake', maxInt: '6弱', area: '駿河湾', magnitude: '6.5', depth: '20km' }] },
+      { time: '05:09', simHours: 0.05, text: '【模擬】静岡県に津波注意報（模擬）が出たという想定です。予想される津波の高さ 0.8m（模擬）。', set: [{ name: '津波注意報', area: '静岡県', region: '380', height: H08 }] },
+      { time: '05:20', simHours: 0.2, text: '【模擬】静岡県の津波注意報（模擬）が津波警報（模擬）に切り替わったという想定です。予想される津波の高さ 2m（模擬）。', set: [{ name: '津波警報', area: '静岡県', region: '380', height: H2 }] },
+      { time: '05:35', simHours: 0.5, text: '【模擬】静岡県の津波警報（模擬）が大津波警報（模擬）に切り替わったという想定です。予想される津波の高さ 5m（模擬）。', set: [{ name: '大津波警報', area: '静岡県', region: '380', height: H5 }] },
+      { time: '05:50', simHours: 0.75, text: '【模擬】静岡県の大津波警報（模擬）の予想される津波の高さが 10m以上（模擬）に上がったという想定です。', set: [{ name: '大津波警報', area: '静岡県', region: '380', height: H10 }] },
+      { time: '14:10', simHours: 9, text: '【模擬】静岡県の大津波警報（模擬）が津波注意報（模擬）に切り替わったという想定です。', set: [{ name: '津波注意報', area: '静岡県', region: '380', height: H1 }] },
+      { time: '翌日 11:10', simHours: 30, text: '【模擬】静岡県の津波注意報（模擬）が解除されたという想定です。', set: [] },
     ],
   },
   fukushima: {
@@ -67,13 +77,13 @@ export const DEMOS = Object.freeze({
       '気象庁 報道発表（2011年3月12日 20:30、3月13日 09:00） https://www.jma.go.jp/jma/press/1103/12j/201103122030.html https://www.jma.go.jp/jma/press/1103/13a/201103130900.html',
     ],
     events: [
-      { time: '2011-03-11 14:46', text: '三陸沖で地震が発生（のちに M9.0）。' },
-      { time: '2011-03-11 14:46', text: '緊急地震速報（警報）：福島県浜通り・中通りなど。' },
+      { time: '2011-03-11 14:46', text: '三陸沖で地震が発生（のちに M9.0）。', info: [{ type: 'quake', area: '三陸沖', magnitude: '9.0（のちの値）' }] },
+      { time: '2011-03-11 14:46', text: '緊急地震速報（警報）：福島県浜通り・中通りなど。', info: [{ type: 'quake', label: '緊急地震速報（警報）', area: '福島県浜通り・中通りなど', basis: '予想' }] },
       { time: '2011-03-11 14:49', text: '津波警報（大津波）：福島県。予想される津波の高さ 3m。', set: [{ name: '津波警報（大津波）', area: '福島県', region: '250', height: H3 }] },
       { time: '2011-03-11 15:14', text: '津波警報（大津波）の更新：福島県の予想高さ 6m。', set: [{ name: '津波警報（大津波）', area: '福島県', region: '250', height: H6 }] },
       { time: '2011-03-11 15:30', text: '津波警報（大津波）の更新：福島県の予想高さ 10m以上。', set: [{ name: '津波警報（大津波）', area: '福島県', region: '250', height: H10 }] },
-      { time: '2011-03-11 15:39', text: '観測：いわき市小名浜で最大波 333cm。' },
-      { time: '2011-03-11 15:51', text: '観測：相馬で最大波 9.3m以上（観測施設の被災でデータが欠けた期間あり）。' },
+      { time: '2011-03-11 15:39', text: '観測：いわき市小名浜で最大波 333cm。', info: [{ type: 'tsunami-obs', height: '333cm', place: '小名浜', region: '250' }] },
+      { time: '2011-03-11 15:51', text: '観測：相馬で最大波 9.3m以上（観測施設の被災でデータが欠けた期間あり）。', info: [{ type: 'tsunami-obs', height: '9.3m以上', place: '相馬', region: '250' }] },
       { time: '2011-03-12 20:20', text: '福島県は津波警報（津波）に切り替え。', set: [{ name: '津波警報（津波）', area: '福島県', region: '250' }] },
       { time: '2011-03-13 07:30', text: '福島県は津波注意報に切り替え。', set: [{ name: '津波注意報', area: '福島県', region: '250' }] },
       { time: '2011-03-13 17:58', text: '津波注意報の解除（全国）。', set: [] },
@@ -142,11 +152,25 @@ export function replayState(demo, elapsedMs) {
   const n = demo.events.length;
   const idx = Math.max(0, Math.min(n - 1, Math.floor(Math.max(0, elapsedMs) / demo.stepMs)));
   let set = [];
-  for (let i = 0; i <= idx; i++) if (demo.events[i].set) set = demo.events[i].set;
+  // Time each kind in effect was announced (or last changed), as recorded.
+  const sig = (k) => `${k.name}|${k.area}|${k.height?.text ?? ''}`;
+  let since = new Map();
+  const facts = [];
+  for (let i = 0; i <= idx; i++) {
+    const ev = demo.events[i];
+    if (ev.set) {
+      const next = new Map();
+      for (const k of ev.set) next.set(sig(k), since.get(sig(k)) ?? ev.time);
+      since = next;
+      set = ev.set;
+    }
+    for (const f of ev.info ?? []) facts.push({ ...f, time: ev.time });
+  }
   const items = set.map((k) => ({
     area_code: k.region ?? DEMO_AREA_CODE,
     area_name: k.area,
     kinds: [{ name: k.name, status: null }],
+    time: since.get(sig(k)) ?? '',
     ...(k.height ? { max_height: { description: k.height.text, value_m: k.height.value_m, unbounded: k.height.unbounded } } : {}),
   }));
   return {
@@ -155,6 +179,7 @@ export function replayState(demo, elapsedMs) {
     event: demo.events[idx],
     log: demo.events.slice(0, idx + 1),
     items,
+    facts,
     inEffect: set.map((k) => k.name),
   };
 }
