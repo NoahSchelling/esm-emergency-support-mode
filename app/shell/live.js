@@ -8,12 +8,18 @@
 
 // Items in effect from a C-A /api/status body.
 export function itemsFromStatus(status) {
-  if (!status || !Array.isArray(status.recent)) return { items: [], simulated: false, count: 0 };
+  // "current" (C-A): the newest message of each group, kept even after it
+  // leaves the 10 newest entries ("recent", older C-A without "current").
+  const list = Array.isArray(status?.current) ? status.current : Array.isArray(status?.recent) ? status.recent : null;
+  if (!list) return { items: [], simulated: false, count: 0 };
   const newest = new Map();
-  for (const e of status.recent) {
+  for (const e of list) {
     const d = e.detail;
-    if (!d || !Array.isArray(d.items) || d.status && d.status !== '通常') continue;
-    const key = d.title || e.title;
+    if (!d || !Array.isArray(d.items) || !d.items.length || d.status && d.status !== '通常') continue;
+    // Same grouping as C-A: every tsunami message carries the current
+    // tsunami list; other kinds are per title and per issuing office.
+    const title = d.title || e.title || '';
+    const key = `${/津波/.test(title) ? '津波' : title}|${e.author ?? ''}`;
     const t = d.report_datetime ?? e.updated ?? 0;
     if (!newest.has(key) || newest.get(key).t < t) newest.set(key, { t, items: d.items });
   }
@@ -39,12 +45,40 @@ export function areaCodesFromArea(r) {
 }
 
 // The tsunami warning that applies to the nearest coast region, if any.
+// A tsunami warning or advisory in effect (JMA kind names such as
+// "大津波警報", "大津波警報：発表", "津波警報", "津波注意報"). Lifts
+// ("警報解除", "津波注意報解除", status 解除), "津波なし" and forecasts
+// ("津波予報（若干の海面変動）") are not.
+export function isTsunamiAnnouncement(k) {
+  const name = k?.name ?? '';
+  if (/解除|なし$/.test(name) || (k?.status && /解除/.test(k.status))) return false;
+  return /大津波|津波警報|津波注意報/.test(name);
+}
+
+// Facts of the replay that still apply. An observed tsunami height counts
+// only while a tsunami warning or advisory is in effect for its region and
+// only if it was observed after that announcement was issued: when JMA
+// lowers a warning after the waves it observed, the older observation no
+// longer raises the border (BW-S1 exception: raise only with a current
+// observation). Other facts (earthquakes) pass.
+export function currentFacts(facts, items, timeMs = () => null) {
+  return (facts ?? []).filter((f) => {
+    if (f.type !== 'tsunami-obs') return true;
+    const its = (items ?? []).filter((it) => String(it.area_code) === String(f.region ?? '') && (it.kinds ?? []).some(isTsunamiAnnouncement));
+    if (!its.length) return false;
+    const ft = timeMs(f.time);
+    if (ft === null) return true;
+    const issued = Math.max(...its.map((it) => timeMs(it.time) ?? -Infinity));
+    return ft >= issued;
+  });
+}
+
 export function tsunamiWarningFor(items, coast) {
   if (!coast) return null;
   for (const it of items) {
     if (String(it.area_code) !== String(coast.region_code)) continue;
     for (const k of it.kinds ?? []) {
-      if (k.status && /解除/.test(k.status)) continue;
+      if (!isTsunamiAnnouncement(k)) continue;
       if (/大津波|津波警報/.test(k.name)) return { name: k.name, area: it.area_name ?? coast.region_name };
     }
   }
@@ -58,7 +92,9 @@ export function forecastHeightFor(items, coast) {
   if (!coast) return null;
   for (const it of items ?? []) {
     if (String(it.area_code) !== String(coast.region_code) || !it.max_height) continue;
-    if ((it.kinds ?? []).every((k) => k.status && /解除/.test(k.status))) continue;
+    // Only with a warning or advisory in effect (not a lift, not a forecast
+    // of slight sea level changes).
+    if (!(it.kinds ?? []).some(isTsunamiAnnouncement)) continue;
     const h = it.max_height;
     const value = Number.isFinite(h.value_m) ? h.value_m : null;
     return {

@@ -236,6 +236,18 @@ test('tracker: stable samples give the circular mean; boundary 358/0/2 stays nea
   close(st.mean > 180 ? st.mean - 360 : st.mean, 0, 1e-9);
 });
 
+test('tracker.latest: the latest sample without the stability check (drawing only)', () => {
+  const t = createHeadingTracker();
+  t.push(ios(0, 10, { at_ms: NOW - 200 }));
+  t.push(ios(40, 10, { at_ms: NOW - 100 }));
+  t.push(ios(80, 10, { at_ms: NOW }));
+  assert.equal(t.read(CTX).status, 'unknown'); // turning: read() refuses
+  const l = t.latest(CTX);
+  assert.equal(l.status, 'ok');
+  assert.equal(l.value.top_true_heading_deg, headingFromSample(ios(80, 10, { at_ms: NOW }), CTX).value.top_true_heading_deg);
+  assert.equal(createHeadingTracker().latest(CTX).status === 'ok', false);
+});
+
 test('tracker: jittery, too few, or a bad latest sample refuses', () => {
   const t = createHeadingTracker();
   t.push(ios(0, 10, { at_ms: NOW - 200 }));

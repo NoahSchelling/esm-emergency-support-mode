@@ -42,7 +42,32 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 USER_AGENT = "hackathon-tomato-proto-c-a/0.1"
 MAX_BYTES = 5 * 1024 * 1024
 MAX_ENTRIES = 200
-MAX_DETAILS_PER_POLL = 5
+MAX_DETAILS_PER_POLL = 20
+# Upper bound of the "current" table (one row per message group and office).
+MAX_CURRENT = 600
+
+
+def group_key(title, author):
+    """Messages that replace each other: the same kind from the same office.
+
+    All tsunami messages (warnings/advisories/forecasts and tsunami
+    information) carry the current tsunami warning list of each area, so
+    the newest one of any of them replaces the others. Other kinds are
+    grouped by their title and the office that issued them (a weather
+    warning of one prefecture never replaces another prefecture's).
+    """
+    t = title or ""
+    return ("津波" if "津波" in t else t, author or "")
+
+
+def detail_priority(title):
+    """Order of detail fetching: tsunami first, then warnings, then others."""
+    t = title or ""
+    if "津波" in t:
+        return 0
+    if is_warning_type(t):
+        return 1
+    return 2
 
 
 def now_ms():
@@ -397,6 +422,10 @@ class Monitor:
                       for name, label, url in FEEDS}
         self.entries = {}
         self.details = {}
+        # Newest message with items per group_key(), kept after the entry
+        # itself falls out of the feed or out of MAX_ENTRIES: a warning stays
+        # in effect until a newer message of the same group replaces it.
+        self.current = {}
         self.demo_stall = None
         self.demo_stall_since = None
 
@@ -489,10 +518,15 @@ class Monitor:
         return all_ok
 
     def _fetch_details(self, source):
-        """Fetch details for the newest entries that do not have one yet."""
+        """Fetch details for entries that do not have one yet.
+
+        Tsunami messages first, then warnings, newest first within each: on a
+        busy day the nationwide feeds carry more messages than one poll
+        fetches, and a tsunami warning must not wait behind them.
+        """
         with self.lock:
             todo = sorted((e for e in self.entries.values() if e["id"] not in self.details),
-                          key=lambda e: e["updated"] or 0, reverse=True)[:MAX_DETAILS_PER_POLL]
+                          key=lambda e: (detail_priority(e["title"]), -(e["updated"] or 0)))[:MAX_DETAILS_PER_POLL]
         for e in todo:
             try:
                 raw = source.fetch_detail(e["link"])
@@ -502,6 +536,22 @@ class Monitor:
                 d = {"error": "%s: %s" % (type(ex).__name__, ex)}
             with self.lock:
                 self.details[e["id"]] = d
+                self._update_current(e, d)
+
+    def _update_current(self, e, d):
+        """Keep the newest normal message with items for its group."""
+        if d.get("error") or not d.get("items") or (d.get("status") and d.get("status") != "通常"):
+            return
+        key = group_key(d.get("title") or e["title"], e.get("author"))
+        t = d.get("report_datetime") or e["updated"] or 0
+        old = self.current.get(key)
+        if old is not None and old["t"] > t:
+            return
+        self.current[key] = {"t": t, "entry": dict(e), "detail": d}
+        if len(self.current) > MAX_CURRENT:
+            drop = sorted(self.current.items(), key=lambda kv: kv[1]["t"])[:len(self.current) - MAX_CURRENT]
+            for k, _ in drop:
+                del self.current[k]
 
     def _trim(self):
         if len(self.entries) <= MAX_ENTRIES:
@@ -557,6 +607,10 @@ class Monitor:
                 "feeds": list(self.feeds.values()),
                 "latest": view(ordered[0]) if ordered else None,
                 "recent": [view(e) for e in ordered[:10]],
+                # The newest message of each group (see group_key): what the
+                # screen uses for the warnings in effect.
+                "current": [dict(c["entry"], detail=c["detail"], mock=bool(mock))
+                            for c in sorted(self.current.values(), key=lambda c: c["t"], reverse=True)],
                 "warnings_in_window": warnings[:10],
                 "demo": {
                     "enabled": self.args.demo,

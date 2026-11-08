@@ -236,6 +236,50 @@ test('Shizuoka simulated: the evacuee view shows a site from the demo point', { 
   await shot(page, 'shell-shizuoka');
 });
 
+test('Shizuoka simulated, Android-like compass: heading up while still, and while turning', { skip }, async (t) => {
+  const { page } = await open(t, { query: '?demo=shizuoka&demostep=60000' });
+  // Absolute orientation without an accuracy value (Android), 20 samples a
+  // second; __rate turns the phone (degrees per second).
+  await page.evaluate(() => {
+    globalThis.__alpha = 300;
+    globalThis.__rate = 0;
+    let last = Date.now();
+    globalThis.__feed = setInterval(() => {
+      const now = Date.now();
+      globalThis.__alpha = (globalThis.__alpha + (globalThis.__rate * (now - last)) / 1000 + 360) % 360;
+      last = now;
+      globalThis.__evac.tracker.push({ type: 'deviceorientationabsolute', alpha: globalThis.__alpha, beta: 20, gamma: 0, absolute: true, webkit_heading: null, webkit_accuracy: null, at_ms: now });
+    }, 50);
+  });
+  const figure = () => page.evaluate(() => document.getElementById('evac-figure').dataset.kind);
+  const kinds = async (ms) => {
+    const seen = new Set();
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      seen.add(await figure());
+      await page.waitForTimeout(150);
+    }
+    return [...seen];
+  };
+  await page.evaluate(() => globalThis.__shell.seekDemo(2)); // a site is the target
+  // still: the demo point is fixed, so no walking check is asked for
+  await page.waitForFunction(() => document.getElementById('evac-figure').dataset.kind === 'arrow', null, { timeout: 4000 });
+  assert.equal(await page.textContent('#compass-state'), '');
+  // a short turn (2.5 s at 120 deg/s) and settling: stays heading up
+  await page.evaluate(() => { globalThis.__rate = 120; });
+  assert.deepEqual(await kinds(2500), ['arrow']);
+  await page.evaluate(() => { globalThis.__rate = 0; });
+  assert.deepEqual(await kinds(2000), ['arrow']);
+  // turning for a long time: north-up, then heading up again when still
+  await page.evaluate(() => { globalThis.__rate = 120; });
+  assert.ok((await kinds(6000)).includes('north-up'));
+  await page.evaluate(() => { globalThis.__rate = 0; });
+  await page.waitForFunction(() => document.getElementById('evac-figure').dataset.kind === 'arrow', null, { timeout: 4000 });
+  // the sensor stops: north-up as before
+  await page.evaluate(() => clearInterval(globalThis.__feed));
+  await page.waitForFunction(() => document.getElementById('evac-figure').dataset.kind === 'north-up', null, { timeout: 4000 });
+});
+
 test('current location with C-A: official major tsunami warning near the coast', { skip }, async (t) => {
   caTsunami = '大津波警報';
   const { page, requests } = await open(t, { server: baseCa, geo: YAIZU_POINT });
@@ -286,7 +330,7 @@ test('consent: one consent; then the inundation estimate decides; withdrawing st
   await page.click('#menu-button');
   await page.click('#menu-prefetch summary');
   assert.match(await page.textContent('#consent-text'), /国土地理院の標高 API/);
-  assert.match(await page.textContent('#consent-stop'), /同意をやめる/);
+  assert.match(await page.textContent('#consent-stop'), /「同意しない」を選んで/);
   await page.check('#consent-yes'); // radio buttons; applies at once
   await page.waitForFunction(() => globalThis.__shell.state.state.imminent === true, null, { timeout: 8000 });
   assert.equal((await shell(page)).basis, 'inundation');
@@ -419,21 +463,26 @@ test('panes: edge buttons and a swipe in the middle switch; a swipe from the edg
   assert.equal(await pane(), 'main');
 });
 
-test('notices: new information at the top, read aloud, stays until closed; history kept and deletable', { skip }, async (t) => {
-  const { page } = await open(t, { query: '?demo=shizuoka&demostep=800' });
+test('notices: only "情報が更新されました", read aloud, closed after 2 s; history kept and deletable', { skip }, async (t) => {
+  const { page } = await open(t, { query: '?demo=shizuoka&demostep=60000' });
+  await page.evaluate(() => globalThis.__shell.seekDemo(1)); // 津波注意報 0.8m
   await page.waitForSelector('#notices .notice');
-  assert.match(await page.textContent('#notices .notice'), /新しい情報：【模擬】津波注意報（静岡県） 予想される津波の高さ 0\.8m/);
-  assert.equal(await page.getAttribute('#notices .notice', 'role'), 'alert');
-  // a newer notice about the same area replaces the older one; nothing disappears by itself
-  await page.waitForFunction(() => /10m以上/.test(document.getElementById('notices').textContent), null, { timeout: 8000 });
-  await page.waitForTimeout(1500);
-  assert.ok(await page.locator('#notices .notice').count() >= 1);
-  await page.click('#notices .notice button');
+  assert.equal((await page.textContent('#notices')).trim(), '情報が更新されました');
+  assert.equal(await page.getAttribute('#notices .notice', 'role'), 'status');
+  assert.equal(await page.locator('#notices button').count(), 0);
+  // closes by itself after 2 s
+  await page.waitForFunction(() => !document.querySelector('#notices .notice'), null, { timeout: 3500 });
+  // the header scrolls away; the menu button stays
+  await page.evaluate(() => window.scrollTo(0, 600));
+  assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('menu-button')).position), 'fixed');
+  assert.ok(await page.evaluate(() => document.querySelector('.topbar').getBoundingClientRect().bottom < 0));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => globalThis.__shell.seekDemo(4)); // up to 大津波警報 10m以上
   // history in the menu, kept on this device
   await page.click('#menu-button');
   await page.click('#menu-history summary');
-  assert.match(await page.textContent('#history-list'), /【模擬】大津波警報（静岡県） 予想される津波の高さ 5m/);
-  assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('bw-history')).length >= 3));
+  assert.match(await page.textContent('#history-list'), /【模擬】大津波警報（静岡県） 予想される津波の高さ 10m以上/);
+  assert.ok(await page.evaluate(() => JSON.parse(localStorage.getItem('bw-history')).length >= 2));
   await page.click('#history-clear');
   assert.equal(await page.evaluate(() => localStorage.getItem('bw-history')), null);
   assert.match(await page.textContent('#history-list'), /まだ記録がありません/);
@@ -449,12 +498,20 @@ test('heights: forecast, elevation, warning marks, terrain note always; map link
   assert.match(h, /予想される津波の高さ2m（津波警報・静岡県）【模擬】/);
   assert.match(h, /いる場所の標高約 1\.4 m⚠️津波よりも下にいます/);
   assert.match(h, /津波は予想より高くなる場合あり。/);
+  assert.equal(await page.isVisible('#heights-note'), true);
+  // the north-up figure says so on the card (not folded)
+  assert.match(await page.textContent('#compass-state'), /^北が上の図です（方位を確かめられないため）。/);
+  // no tsunami information: no tsunami note
+  await page.evaluate(() => globalThis.__shell.seekDemo(0)); // earthquake only
+  await page.waitForFunction(() => document.getElementById('heights-note').hidden, null, { timeout: 3000 });
+  await page.evaluate(() => globalThis.__shell.seekDemo(2));
   assert.match(h, /タワーやビルの上の階の高さは含みません/);
   assert.doesNotMatch(h, /安全です|安全な場所|大丈夫|安心/);
   const href = await page.getAttribute('#evac-map-link', 'href');
-  assert.match(href, /^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&destination=[\d.]+%2C[\d.]+&travelmode=walking$/);
-  assert.ok(!href.includes('34.86000%2C138.32000')); // the demo point is not in the URL
-  assert.match(await page.textContent('#evac-map-wrap'), /通れない道や浸水を考えていません/);
+  assert.match(href, /^https:\/\/maps\.gsi\.go\.jp\/#15\/[\d.]+\/[\d.]+\/$/);
+  assert.ok(!href.includes('34.860000/138.320000')); // the demo point is not in the URL
+  assert.equal(await page.textContent('#evac-map-link'), '地図で避難目標を見る');
+  assert.match(await page.textContent('#evac-map-wrap'), /地図アプリの経路は通れない道を反映していません/);
   await shot(page, 'shell-heights');
 });
 

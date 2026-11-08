@@ -257,6 +257,13 @@ export function createHeadingTracker(opts = {}) {
     get size() {
       return samples.length;
     },
+    // The latest sample alone, without the stability check of read(). For
+    // drawing only: the screen turns an already accepted figure with it
+    // between two read() decisions. Never use it to decide whether to show
+    // an arrow.
+    latest(ctx) {
+      return headingFromSample(samples.length ? samples[samples.length - 1] : null, ctx, o);
+    },
     // ctx: { nowMs, screenAngleDeg, declinationWestDeg }
     read(ctx) {
       const latest = samples.length ? samples[samples.length - 1] : null;

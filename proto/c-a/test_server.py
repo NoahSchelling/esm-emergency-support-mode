@@ -125,6 +125,37 @@ class MonitorTests(unittest.TestCase):
         self.assertTrue(s["latest"]["mock"])
         self.assertEqual(s["warnings_in_window"], [])
 
+    def test_current_keeps_warnings_after_they_leave_recent(self):
+        m = server.Monitor(args())
+        tsunami = {"title": "津波警報・注意報・予報a", "status": "通常", "report_datetime": 1000,
+                   "items": [{"area_code": "380", "kinds": [{"name": "大津波警報", "status": None}]}], "error": None}
+        m._update_current({"id": "t1", "title": "津波警報・注意報・予報a", "author": "気象庁", "updated": 1000}, tsunami)
+        # many other messages afterwards (other offices, other kinds)
+        for i in range(30):
+            m._update_current({"id": "w%d" % i, "title": "気象警報・注意報（Ｒ０６）", "author": "office%d" % i, "updated": 2000 + i},
+                              {"title": "気象警報・注意報（Ｒ０６）", "status": "通常", "report_datetime": 2000 + i,
+                               "items": [{"area_code": str(i), "kinds": [{"name": "大雨警報", "status": None}]}], "error": None})
+        cur = m.status()["current"]
+        self.assertEqual(len(cur), 31)  # one per office, and the tsunami one
+        self.assertIn("大津波警報", [it["kinds"][0]["name"] for c in cur for it in c["detail"]["items"]])
+        # tsunami information replaces the warning message (same group); an older one does not
+        info = dict(tsunami, title="津波情報a", report_datetime=1500,
+                    items=[{"area_code": "380", "kinds": [{"name": "津波警報", "status": None}]}])
+        m._update_current({"id": "t2", "title": "津波情報a", "author": "気象庁", "updated": 1500}, info)
+        m._update_current({"id": "t0", "title": "津波警報・注意報・予報a", "author": "気象庁", "updated": 900}, dict(tsunami, report_datetime=900))
+        ts = [c for c in m.status()["current"] if "津波" in c["title"]]
+        self.assertEqual(len(ts), 1)
+        self.assertEqual(ts[0]["detail"]["items"][0]["kinds"][0]["name"], "津波警報")
+        # training messages and messages without items are not kept
+        m._update_current({"id": "x", "title": "津波警報・注意報・予報a", "author": "気象庁", "updated": 9000},
+                          dict(tsunami, status="訓練", report_datetime=9000))
+        self.assertEqual([c for c in m.status()["current"] if "津波" in c["title"]][0]["id"], "t2")
+
+    def test_detail_priority_tsunami_first(self):
+        self.assertEqual(server.detail_priority("津波情報a"), 0)
+        self.assertEqual(server.detail_priority("気象警報・注意報（Ｒ０６）"), 1)
+        self.assertEqual(server.detail_priority("震度速報"), 2)
+
     def test_inject_warning(self):
         m = server.Monitor(args())
         m.poll_once()

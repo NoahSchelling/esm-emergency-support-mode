@@ -10,7 +10,9 @@
 
 // Always shown with the heights, whatever the numbers are.
 export const TERRAIN_NOTE = '津波は予想より高くなる場合あり。';
-export const MAP_ROUTE_NOTE = '地図アプリの経路は、通れない道や浸水を考えていません。';
+// Shown under the map link. The link itself has no route: a navigation app
+// does not know about tsunamis and may lead along the coast.
+export const MAP_NOTE = '地図アプリの経路は通れない道を反映していません';
 export const ELEVATION_SOURCE = '標高：国土地理院の標高 API の値';
 // The elevation of a site is the ground. A tsunami evacuation tower or
 // building is used from its upper floors, which this value does not include.
@@ -140,11 +142,12 @@ export function heightsView({ forecast = null, observed = null, here = null, sit
   return { rows, warn: rows.some((r) => r.warn), top, note: TERRAIN_NOTE, source: ELEVATION_SOURCE, siteNote: site ? SITE_GROUND_NOTE : '' };
 }
 
-// Google Maps directions URL (official URL format, no API key): walking,
-// destination = the public coordinates of the designated site only. The
-// person's position is never put in the URL.
-export function mapRouteUrl(site) {
+// GSI map (地理院地図) centred on the public coordinates of the designated
+// site, zoom 15. No route: a navigation app does not know about tsunamis and
+// may lead along a coastal road. The person's position is never put in the
+// URL.
+export const MAP_ZOOM = 15;
+export function mapSiteUrl(site) {
   if (!site || !Number.isFinite(site.latitude) || !Number.isFinite(site.longitude)) return null;
-  const dest = `${site.latitude.toFixed(5)},${site.longitude.toFixed(5)}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}&travelmode=walking`;
+  return `https://maps.gsi.go.jp/#${MAP_ZOOM}/${site.latitude.toFixed(6)}/${site.longitude.toFixed(6)}/`;
 }

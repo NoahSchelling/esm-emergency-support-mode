@@ -90,4 +90,4 @@
 | 切迫とみなす海岸線からの距離 | 1000m | `ALERT_DEFAULTS.imminentCoastDistanceM` |
 | 種類の名前とレベルの表 | 2 章の表 | `levelOfKind` |
 | C-A を読み直す間隔 | 15 秒 | `app/shell/shell-main.js` |
-| デモの 1 コマの長さ | 6〜8 秒 | `app/shell/demos.js` |
+| デモの 1 コマの長さ | 7〜9 秒（2026-11-08 に各 1 秒延ばした） | `app/shell/demos.js` |

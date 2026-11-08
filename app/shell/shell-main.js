@@ -12,7 +12,7 @@
 // map tile around it is fetched from the hazard map portal (./lookup.js).
 
 import { DEMOS, DEMO_IDS, DEMO_AREA_CODE, replayState, tsunamiInEffect, demoElapsedHours, recordTimeMs } from './demos.js';
-import { itemsFromStatus, areaCodesFromArea, tsunamiWarningFor, forecastHeightFor, observedHeightFor } from './live.js';
+import { itemsFromStatus, areaCodesFromArea, tsunamiWarningFor, forecastHeightFor, observedHeightFor, currentFacts } from './live.js';
 import { parseHeight } from './heights.js';
 import { createHistory, entriesFromItems, disasterStartMs, historyLine } from './history.js';
 import { readConsent, writeConsent, CONSENT_TEXT, CONSENT_STOP } from './consent.js';
@@ -25,7 +25,7 @@ const $ = (id) => document.getElementById(id);
 const TICK_MS = 250;
 const CA_POLL_MS = 15000; // ！！仮の値！！
 const CA_STATUS_URL = '/api/ca/status';
-const MAX_NOTICES = 3;
+const NOTICE_MS = 2000;
 
 async function tryImport(path) {
   try {
@@ -118,46 +118,38 @@ showPane('main');
 
 // ---------------------------------------------------------------- notices (top)
 
-// New information is shown at the top and read aloud (role="alert"). It
-// stays until the person closes it.
+// Short notices at the top, read aloud, closed by themselves after
+// NOTICE_MS. They only say that something changed: the information itself
+// is in the line above the compass (#headline-card), so the screen does not
+// repeat it.
+export const UPDATED_TEXT = '情報が更新されました';
+export const OBSERVED_FRAME_TEXT = '気象庁の観測値による色枠表示';
 const notices = [];
 let noticeSeq = 0;
-// A newer notice about the same thing (key) replaces the older one.
-function notify(text, key = null) {
-  if (key !== null) {
-    const i = notices.findIndex((x) => x.key === key);
+// The same text again only restarts its timer.
+function notify(text) {
+  const old = notices.find((x) => x.text === text);
+  if (old) clearTimeout(old.timer);
+  const n = old ?? { id: ++noticeSeq, text };
+  if (!old) notices.push(n);
+  n.timer = setTimeout(() => {
+    const i = notices.indexOf(n);
     if (i >= 0) notices.splice(i, 1);
-  }
-  notices.unshift({ id: ++noticeSeq, text, key });
+    renderNotices();
+  }, NOTICE_MS);
   renderNotices();
 }
 function renderNotices() {
-  const box = $('notices');
-  const shown = notices.slice(0, MAX_NOTICES);
-  box.replaceChildren(...shown.map((n) => {
+  $('notices').replaceChildren(...notices.map((n) => {
     const d = document.createElement('div');
     d.className = 'notice';
-    d.setAttribute('role', 'alert');
+    d.setAttribute('role', 'status');
     d.dataset.noticeId = String(n.id);
     const p = document.createElement('p');
     p.textContent = n.text;
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = '閉じる';
-    b.addEventListener('click', () => {
-      const i = notices.findIndex((x) => x.id === n.id);
-      if (i >= 0) notices.splice(i, 1);
-      renderNotices();
-    });
-    d.append(p, b);
+    d.append(p);
     return d;
   }));
-  if (notices.length > MAX_NOTICES) {
-    const more = document.createElement('p');
-    more.className = 'note notices-more';
-    more.textContent = `ほかに ${notices.length - MAX_NOTICES} 件の知らせがあります（閉じると表示します）。`;
-    box.append(more);
-  }
 }
 
 // ---------------------------------------------------------------- mode (demo ON/OFF and place)
@@ -171,6 +163,7 @@ let demoStart = Date.now();
 let demoPaused = false;
 let pausedAt = 0;
 let lastLevel = null; // for the "no longer in effect" notice
+let lastObservedRaise = null; // level the observation raised the border to
 
 function setMode(m) {
   if (DEMO_IDS.includes(m)) {
@@ -187,6 +180,7 @@ function setMode(m) {
   $('demo-toggle').checked = demoOn;
   $('demo-controls').hidden = mode === 'live';
   lastLevel = null;
+  lastObservedRaise = null;
   if (mode === 'live') pollCa().then(render);
   render();
 }
@@ -221,7 +215,7 @@ if (!A.__error) A.loadCoastData().then((d) => { coast = d; }, () => {});
 if (!AR.__error) AR.loadAreaData().then((d) => { areaData = d; }, () => {});
 const locSensor = S.__error ? null : S.createLocationSensor({ env: S.createDeviceEnv() });
 // The location is asked for with the evacuee view's button (a user gesture).
-$('evac-start')?.addEventListener('click', () => locSensor?.start());
+$('evac-start')?.addEventListener('change', (e) => { if (e.target.checked) locSensor?.start(); else locSensor?.stop(); });
 
 // ---------------------------------------------------------------- consent (one, for all lookups)
 
@@ -366,8 +360,10 @@ function demoInputs(now) {
 let lastDispatch = '';
 function tellEvacuee(inp, state) {
   const forecast = forecastHeightFor(state.status === 'ok' ? inp.items : [], inp.coast);
-  const observed = state.status === 'ok' && inp.observed ? observedHeightFor(inp.replay?.facts ?? [], inp.coast, parseHeight) : null;
-  const common = { forecast, observed, here: inp.here, received: inp.received, mark: inp.mark };
+  const observed = state.status === 'ok' && inp.observed ? observedHeightFor(inp.facts, inp.coast, parseHeight) : null;
+  // Tsunami information is shown (the note "津波は予想より高くなる場合あり。").
+  const tsunamiInfo = state.status === 'ok' && (tsunamiInEffectFor(inp.items, inp.coast) || Boolean(forecast) || Boolean(observed));
+  const common = { forecast, observed, tsunamiInfo, here: inp.here, received: inp.received, mark: inp.mark };
   let detail;
   if (inp.demo) {
     const ts = tsunamiInEffect(inp.replay);
@@ -447,13 +443,11 @@ function recordAndNotify(inp, state) {
     }
   }
   const added = history.add(entries);
-  for (const e of added) {
-    notify(`新しい情報：${e.mark}${e.name}（${e.area}）${e.height ? ` 予想される津波の高さ ${e.height}` : ''}`, `${e.source}|${e.area}`);
+  if (added.length) {
+    notify(UPDATED_TEXT);
+    renderHistory();
   }
-  if (added.length) renderHistory();
-  if (lastLevel !== null && lastLevel > 0 && state.level === 0) {
-    notify(`${inp.mark}この地域への注意報・警報がなくなりました（受け取っている範囲で）。公的な発表で確かめてください。`, 'level0');
-  }
+  if (lastLevel !== null && lastLevel > 0 && state.level === 0) notify(UPDATED_TEXT);
   lastLevel = state.level;
 }
 
@@ -473,13 +467,20 @@ function render() {
   // Used only while a tsunami announcement (advisory or warning) is in
   // effect for that region: once everything is lifted, an old observation
   // does not keep the border up.
-  const obs = tsunamiInEffectFor(inp.items, inp.coast) ? observedHeightFor(inp.replay?.facts ?? [], inp.coast, parseHeight) : null;
+  inp.facts = currentFacts(inp.replay?.facts ?? [], inp.items, recordTimeMs);
+  const obs = tsunamiInEffectFor(inp.items, inp.coast) ? observedHeightFor(inp.facts, inp.coast, parseHeight) : null;
   inp.observed = obs ? { level: observedLevel(obs), text: obs.text, place: obs.place } : null;
   const unknown = (detail) => ({ status: 'unknown', level: null, imminent: false, basis: null, color: null, blink: 'none', detail, sources: [] });
   let state;
   if (A.__error) state = unknown('外枠のモジュールを読み込めませんでした。');
   else if (!inp.demo && inp.received && !inp.areaKnown) state = unknown('この地域への発表を選べません。発表がないという意味ではありません。');
   else state = A.alertState(inp);
+  // The border raised by an observed height (above what the announcements
+  // alone give): say so once, when it starts or goes higher.
+  const base = inp.observed && state.status === 'ok' ? A.alertState({ ...inp, observed: null }) : null;
+  const raised = base && state.level > (base.level ?? 0) ? state.level : null;
+  if (raised !== null && (lastObservedRaise === null || raised > lastObservedRaise)) notify(OBSERVED_FRAME_TEXT);
+  lastObservedRaise = raised;
   if (!inp.demo && inp.simulated && state.status === 'ok') state = { ...state, detail: `【模擬データ】${state.detail}` };
   current = { mode, inp, state };
 
@@ -560,7 +561,7 @@ let lines = [];
 function renderHeadline(inp, state) {
   const codes = new Set([...inp.areaCodes, inp.coast?.region_code].filter(Boolean).map(String));
   const items = state.status === 'ok' ? inp.items.filter((it) => codes.has(String(it.area_code))) : [];
-  lines = infoLines({ items, facts: state.status === 'ok' ? inp.replay?.facts ?? [] : [], levelOf, parseHeight });
+  lines = infoLines({ items, facts: state.status === 'ok' ? inp.facts ?? [] : [], levelOf, parseHeight });
   const top = lines[0] ?? null;
   const text = top ? top.text
     : state.status === 'ok' ? '身の安全を確保してください'
