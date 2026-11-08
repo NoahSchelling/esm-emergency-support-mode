@@ -14,7 +14,7 @@ export const CONSENT_TEXT = Object.freeze([
   '避難場所の標高は、公開されている避難場所の座標を送って調べます（いる場所の位置は送りません）。この取得は同意がなくても行います。',
 ]);
 
-export const CONSENT_STOP = 'やめるときは、この画面の「同意をやめる」を押してください。やめた後は送りません。';
+export const CONSENT_STOP = 'やめるときは、この画面で「同意しない」を選んでください。選んだ後は送りません。';
 
 export function readConsent(storage) {
   try {

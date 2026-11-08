@@ -90,23 +90,25 @@ details[open] > summary::before { content: "▼"; }
 @keyframes frame-hard { 0% { border-color: var(--frame-color); } 50% { border-color: var(--bg); } }
 
 /* ---------------------------------------------------------------- top bar and hamburger menu */
-.top { position: sticky; top: 10px; z-index: 900; background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
-.topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 760px; margin: 0 auto; padding: 6px 40px; }
+/* The header scrolls away with the page (the evacuation information comes
+   first); only the menu button stays, fixed in the top right corner. */
+.top { position: relative; background: var(--bg); border-bottom: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 760px; min-height: 60px; margin: 0 auto; padding: 6px 76px 6px 40px; }
 .topbar-title { font-weight: 800; font-size: 1.05rem; letter-spacing: 0.01em; }
 .brand { display: inline-block; padding: 0 8px; margin-right: 4px; border-radius: 8px; background: var(--fg); color: var(--bg); font-family: var(--mono); font-size: 0.9rem; }
-.menu-button { width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); }
+.menu-button { position: fixed; top: 16px; right: 16px; z-index: 960; background: rgba(255, 255, 255, 0.94); box-shadow: var(--shadow); width: 48px; height: 48px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); }
 .burger { display: inline-flex; flex-direction: column; gap: 5px; }
 .burger span { display: block; width: 22px; height: 2.5px; border-radius: 2px; background: var(--fg); transition: transform 0.15s ease, opacity 0.15s ease; }
 .menu-button[aria-expanded="true"] .burger span:nth-child(1) { transform: translateY(7.5px) rotate(45deg); }
 .menu-button[aria-expanded="true"] .burger span:nth-child(2) { opacity: 0; }
 .menu-button[aria-expanded="true"] .burger span:nth-child(3) { transform: translateY(-7.5px) rotate(-45deg); }
 
-.notices { max-width: 760px; margin: 0 auto; padding: 0 40px; max-height: 30vh; overflow-y: auto; }
-.notice { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; padding: 6px 6px 6px 12px; border-radius: var(--radius-sm);
-  background: var(--yellow-soft); color: var(--yellow-ink); border: 1px solid #facc15; font-weight: bold; font-size: 0.95rem; }
-.notice p { margin: 0; flex: 1 1 auto; min-width: 0; align-self: center; }
-.notice button { flex: 0 0 auto; min-height: 40px; font-weight: normal; padding: 6px 10px; }
-.notices-more { margin: 4px 0; }
+/* Short notices over the top of the page, left of the menu button; they
+   close by themselves after 2 s. */
+.notices { position: fixed; z-index: 955; top: 16px; left: 16px; right: 76px; max-width: 640px; pointer-events: none; }
+.notice { margin: 0 0 6px; padding: 10px 14px; border-radius: var(--radius-sm); min-height: 48px; display: flex; align-items: center;
+  background: var(--fg); color: var(--bg); font-weight: bold; font-size: 1rem; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25); }
+.notice p { margin: 0; }
 
 .menu-panel {
   position: fixed; z-index: 950; left: 10px; right: 10px; top: 74px; max-height: calc(100vh - 94px); overflow-y: auto;
@@ -195,18 +197,23 @@ details[open] > summary::before { content: "▼"; }
 .c-tick-major { stroke: var(--fg); stroke-width: 3; }
 .c-n { fill: var(--red); font-size: 22px; font-weight: 800; }
 .c-dir { fill: var(--muted); font-size: 16px; font-weight: bold; }
-.c-dial { transition: transform 0.6s ease; }
-.c-label { transform-box: fill-box; transform-origin: center; transition: transform 0.6s ease; }
+/* Turns follow the heading continuously, each with a 0.3 s ease. */
+.c-dial { transition: transform 0.3s ease-out; }
+.c-label { transform-box: fill-box; transform-origin: center; transition: transform 0.3s ease-out; }
 .c-facing { fill: var(--fg); }
 .c-facing-unconfirmed { fill: none; stroke: var(--fg); stroke-width: 3; }
 /* Heading up: the fixed upward arrow is the direction the device faces;
    the target mark (orange) turns around it with the dial. */
-.evac-arrow-shape { fill: var(--blue); stroke: #ffffff; stroke-width: 3; }
-.c-target-up { transition: transform 0.6s ease; }
+.evac-arrow-shape { fill: #000000; }
+.c-target-up { transition: transform 0.3s ease-out; }
 .c-target-line { stroke: var(--orange); stroke-width: 5; stroke-linecap: round; }
 .c-target-dot { fill: #c2410c; }
-.c-target-label { fill: #ffffff; font-size: 15px; font-weight: 800; transform-box: fill-box; transform-origin: center; transition: transform 0.6s ease; }
-.c-target, .c-facing-unconfirmed { transition: transform 0.6s ease; }
+.c-target-label { fill: #ffffff; font-size: 15px; font-weight: 800; transform-box: fill-box; transform-origin: center; transition: transform 0.3s ease-out; }
+.c-target, .c-facing-unconfirmed { transition: transform 0.3s ease-out; }
+/* A direction marked as blocked: a cross on the rim (part of the dial). */
+.c-excl { stroke: #ffffff; stroke-width: 9; stroke-linecap: round; }
+.c-excl-x { stroke: var(--red-ink); stroke-width: 5; stroke-linecap: round; }
+@media (prefers-reduced-motion: reduce) { .c-dial, .c-label, .c-target-up, .c-target-label, .c-target, .c-facing-unconfirmed { transition: none; } }
 .evac-bearing { stroke: var(--orange); stroke-width: 4; stroke-dasharray: 6 6; }
 .evac-bearing-dot { fill: var(--orange); stroke: #ffffff; stroke-width: 3; }
 .evac-center { fill: var(--fg); }
@@ -216,6 +223,7 @@ details[open] > summary::before { content: "▼"; }
 .evac-none { color: var(--muted); font-weight: bold; }
 .target-sub { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 12px; font-size: 1.15rem; font-weight: bold; }
 .evac-straight { margin-top: 6px !important; }
+.compass-state { font-size: 0.95rem; font-weight: bold; background: var(--soft); border: 1px dashed var(--line-strong); padding: 6px 10px; border-radius: var(--radius-sm); }
 .evac-message { font-size: 1rem; background: var(--orange-soft); color: var(--orange-ink); padding: 8px 12px; border-radius: var(--radius-sm); text-align: left; }
 
 .heights-card { padding: 12px 18px; }
@@ -239,7 +247,15 @@ button.evac-big {
   border: 2px solid var(--fg); border-radius: var(--radius-sm);
 }
 button.evac-start { min-height: 56px; font-size: 1.05rem; background: var(--fg); color: var(--bg); }
-button.evac-undo { min-height: 44px; min-width: 96px; margin-left: 4px; }
+.excl-fold > summary { font-size: 14pt; }
+.excl-list { list-style: none; margin: 0; padding: 0; }
+.excl-list li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-weight: bold; }
+.excl-list li:last-child { border-bottom: none; }
+.excl-list time { font-family: var(--mono); }
+.excl-empty { color: var(--muted); font-weight: normal !important; display: block !important; }
+button.evac-undo { min-height: 44px; min-width: 96px; }
+.evac-sensors { padding: 4px 18px; border: 2px solid var(--fg); border-radius: var(--radius-sm); font-size: 1.05rem; }
+.switch-sensors:checked { background: var(--blue); }
 
 /* Bottom of the main pane: memo, public information first, demo information. */
 .bottom { max-width: 760px; margin: 0 auto; padding: 0 40px 32px; }
@@ -289,8 +305,8 @@ td .detail { display: block; }
   .bento { grid-template-columns: 1fr 1fr; align-items: start; }
   .bento > * { grid-column: 1 / -1; }
   .bento > .headline-card { grid-column: 1 / -1; }
-  .bento > .compass-card { grid-column: 1; grid-row: span 4; }
-  .bento > .heights-card, .bento > .info-card, .bento > .evac-map, .bento > #evac-exclude { grid-column: 2; }
+  .bento > .compass-card { grid-column: 1; grid-row: span 6; }
+  .bento > .heights-card, .bento > .info-card, .bento > .evac-map, .bento > #evac-exclude, .bento > .excl-fold, .bento > .evac-sensors { grid-column: 2; }
 }
 #status-mode { white-space: normal; }
 /* Colour of each information line (published kind, or the height class of an observation). */

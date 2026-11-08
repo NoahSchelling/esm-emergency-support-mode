@@ -131,7 +131,9 @@ test('evac sources: no innerHTML, no external scripts, no green, no input fields
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const evacPart = html.slice(html.indexOf('<main id="view-evac"'), html.indexOf('<main id="view-support"'));
   assert.ok(evacPart.length > 100);
-  assert.doesNotMatch(evacPart, /<input|<textarea|<select/);
+  // no text entry; the only input is the toggle switch of the sensors
+  assert.doesNotMatch(evacPart, /<textarea|<select/);
+  assert.deepEqual(evacPart.match(/<input[^>]*>/g), ['<input type="checkbox" role="switch" id="evac-start" class="switch switch-sensors">']);
   assert.match(evacPart, /直線の方向です。道順ではありません。/);
 });
 

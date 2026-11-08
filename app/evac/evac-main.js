@@ -6,12 +6,24 @@
 // page's own files and the evacuation data file on the same site.
 
 import { evacViewModel, parseSimParam, scenarioFromSimKey, receptionLine, arrowLabel, facingText, SHOCK_TEXT, SCENARIOS } from './model.js';
-import { heightsView, mapRouteUrl, elevationShort, ELEVATION_SOURCE } from '../shell/heights.js';
+import { heightsView, mapSiteUrl, elevationShort, ELEVATION_SOURCE } from '../shell/heights.js';
 
 const $ = (id) => document.getElementById(id);
 const SVG = 'http://www.w3.org/2000/svg';
-// The compass (the direction the device faces) is redrawn once a second.
+// The whole view is redrawn once a second. The compass alone follows the
+// heading more often (LIVE_MS), each turn with a 0.3 s ease (app.css).
 const REFRESH_MS = 1000;
+const LIVE_MS = 100;
+// ！！仮の値！！ While the phone is being turned, tracker.read() refuses for
+// about a second (the samples spread out), and again for about a second
+// after it stops. For up to this long after the last accepted reading, the
+// latest sample of the same sensor is used, so the figure does not flip to
+// north-up and back in the middle of a turn (the live loop turns it with the
+// same sample). A turn that lasts longer still gives the north-up figure.
+const TURN_HOLD_MS = 4000;
+// ！！仮の値！！ The hold needs a sample this recent: when the sensor stops
+// sending, the figure falls back as before.
+const FRESH_SAMPLE_MS = 500;
 
 // ---------------------------------------------------------------- view switch
 
@@ -111,6 +123,7 @@ let exclusions = [];
 // A context sent before this module finished loading.
 if (globalThis.__appContext) takeContext(globalThis.__appContext);
 let current = null; // last computeEvacDirections result
+let lastStableHeading = null; // { heading, atMs }: last reading tracker.read() accepted
 
 $('evac-exclude').addEventListener('click', () => {
   const c = current?.status === 'ok' ? current.value.candidates[0] : null;
@@ -121,9 +134,18 @@ $('evac-exclude').addEventListener('click', () => {
 
 // ---------------------------------------------------------------- start (user gesture)
 
-$('evac-start').addEventListener('click', () => {
+// A toggle switch: ON starts the position and the orientation, OFF stops them.
+$('evac-start').addEventListener('change', () => {
+  if (!$('evac-start').checked) {
+    if (locSensor) locSensor.stop();
+    if (orientation) orientation.stop();
+    orientation = null;
+    $('evac-perm').textContent = '位置と方位を使うのをやめました。';
+    render();
+    return;
+  }
   // iPhone Safari: ask for the orientation permission first, directly in
-  // the click handler (no await before it).
+  // the event handler of the tap (no await before it).
   const perm = evacOk ? E.requestOrientationPermission() : Promise.resolve('unsupported');
   if (locSensor) locSensor.start();
   perm.then((p) => {
@@ -134,11 +156,10 @@ $('evac-start').addEventListener('click', () => {
       unsupported: 'この端末・ブラウザでは方位が使えません。文と北を上にした図で示します。',
       error: '方位の許可を確かめられませんでした。文と北を上にした図で示します。',
     }[p] ?? '';
-    if (evacOk && !orientation && (p === 'granted' || p === 'not_required')) {
+    if (evacOk && !orientation && $('evac-start').checked && (p === 'granted' || p === 'not_required')) {
       orientation = E.startOrientation(tracker);
     }
   });
-  $('evac-start').textContent = '位置と方位を使っています';
 });
 if (!sensorsOk) $('evac-perm').textContent = '位置のモジュールを読み込めませんでした。';
 
@@ -197,6 +218,11 @@ const compass = (() => {
   dot.append(svg('line', { x1: 0, y1: 0, x2: 0, y2: -100, class: 'evac-bearing' }));
   dot.append(svg('circle', { cx: 0, cy: -100, r: 12, class: 'evac-bearing-dot' }));
   dial.append(dot);
+  // Directions marked as blocked: a cross on the rim (turns with the dial).
+  const exclG = svg('g', { class: 'c-excls' });
+  dial.append(exclG);
+  let exclMarks = [];
+  let exclKey = '';
   // North-up figure: the direction faced, an outlined mark on the rim.
   const facingRim = svg('path', { d: 'M0,-118 L10,-104 L-10,-104 Z', class: 'c-facing-unconfirmed' });
   dial.append(facingRim);
@@ -209,9 +235,10 @@ const compass = (() => {
   flag.textContent = '避';
   target.append(flag);
   s.append(target);
-  // Heading up: the fixed upward arrow = the direction the device faces.
+  // Heading up: the fixed upward triangle (black, plain) = the direction the
+  // device faces.
   const up = svg('g', { class: 'c-up' });
-  up.append(svg('path', { d: 'M0,-58 L26,-14 L9,-14 L9,40 L-9,40 L-9,-14 L-26,-14 Z', class: 'evac-arrow-shape' }));
+  up.append(svg('path', { d: 'M0,-46 L28,4 L-28,4 Z', class: 'evac-arrow-shape' }));
   s.append(up);
   s.append(svg('circle', { cx: 0, cy: 0, r: 5, class: 'evac-center' }));
   const st = { dial: null, dot: null, rim: null, target: null };
@@ -219,20 +246,54 @@ const compass = (() => {
     st[key] = nearAngle(st[key], deg);
     el.style.transform = `rotate(${st[key]}deg)`;
   };
+  const turnDial = (deg) => {
+    turn(dial, 'dial', deg);
+    // Labels and crosses stay upright whichever way the dial turns.
+    for (const [tx, a] of labels) tx.style.transform = `rotate(${-(st.dial + a)}deg)`;
+    for (const [x, a] of exclMarks) x.style.transform = `rotate(${-(st.dial + a)}deg)`;
+  };
+  const turnTarget = (deg) => {
+    turn(target, 'target', deg);
+    flag.style.transform = `rotate(${-st.target}deg)`;
+  };
   return {
     el: s,
+    // Follow the heading between full redraws (heading up only).
+    live({ dialDeg, arrowDeg }) {
+      turnDial(dialDeg);
+      if (Number.isFinite(arrowDeg)) turnTarget(arrowDeg);
+    },
+    // list: [{ center_deg, until_ms }] (true bearings of the blocked directions)
+    setExclusions(list) {
+      const key = list.map((x) => `${x.center_deg}|${x.until_ms}`).join(',');
+      if (key === exclKey) return;
+      exclKey = key;
+      const groups = [];
+      exclMarks = list.map((x) => {
+        const g = svg('g', { transform: `rotate(${x.center_deg})` });
+        const mark = svg('g', { class: 'c-excl-mark' });
+        mark.style.transformBox = 'fill-box';
+        mark.style.transformOrigin = 'center';
+        for (const cls of ['c-excl', 'c-excl-x']) {
+          mark.append(svg('line', { x1: -9, y1: -109, x2: 9, y2: -91, class: cls }));
+          mark.append(svg('line', { x1: 9, y1: -109, x2: -9, y2: -91, class: cls }));
+        }
+        g.append(mark);
+        groups.push(g);
+        return [mark, x.center_deg];
+      });
+      exclG.replaceChildren(...groups);
+      s.dataset.exclusions = String(list.length);
+      turnDial(st.dial ?? 0);
+    },
     // view: { kind: 'arrow' | 'north-up' | 'none', headingUp, dialDeg, targetDeg, arrowDeg, facingDeg, label }
     set(v) {
-      turn(dial, 'dial', v.dialDeg);
-      for (const [tx, a] of labels) tx.style.transform = `rotate(${-(st.dial + a)}deg)`;
+      turnDial(v.dialDeg);
       flag.style.transform = `rotate(${-(st.target ?? 0)}deg)`;
       dot.style.display = v.kind === 'north-up' ? '' : 'none';
       if (v.kind === 'north-up') turn(dot, 'dot', v.targetDeg);
       target.style.display = v.kind === 'arrow' ? '' : 'none';
-      if (v.kind === 'arrow') {
-        turn(target, 'target', v.arrowDeg);
-        flag.style.transform = `rotate(${-st.target}deg)`;
-      }
+      if (v.kind === 'arrow') turnTarget(v.arrowDeg);
       up.style.display = v.headingUp ? '' : 'none';
       const rim = !v.headingUp && Number.isFinite(v.facingDeg);
       facingRim.style.display = rim ? '' : 'none';
@@ -265,15 +326,30 @@ function render() {
   // The direction the device faces. Without a position, the magnetic
   // declination of central Japan is used for this readout only.
   const here = loc?.status === 'ok' ? loc.value : { latitude: 36, longitude: 138 };
-  const heading = tracker ? tracker.read({
+  const headingCtx = {
     nowMs: now,
     screenAngleDeg: E.currentScreenAngle(),
     declinationWestDeg: E.declinationWestDeg(here.latitude, here.longitude),
-  }) : null;
+  };
+  let heading = tracker ? tracker.read(headingCtx) : null;
+  if (heading?.status === 'ok') lastStableHeading = { heading, atMs: now };
+  else if (lastStableHeading && now - lastStableHeading.atMs <= TURN_HOLD_MS) {
+    // Only the stability check failed (the same sensor still gives fresh
+    // values): the phone is being turned. Use its latest value.
+    const latest = tracker.latest(headingCtx);
+    if (latest?.status === 'ok' && latest.value.basis === lastStableHeading.heading.value.basis
+      && now - latest.value.at_ms <= FRESH_SAMPLE_MS) heading = latest;
+  }
   if (hazard && data && loc?.status === 'ok' && !(ctx && ctx.hasEvacData === false)) {
     const v = loc.value;
     const fixAt = Date.parse(loc.observed_at);
-    const course = { heading_deg: v.heading_deg, speed_mps: v.speed_mps, at_ms: fixAt };
+    // The compass is checked against the GPS course of the device itself.
+    // In a demo the position is the demo's fixed point, but the course of
+    // the real device (when the sensors are on) still checks the compass.
+    const real = ctx?.position && locSensor ? locSensor.read() : null;
+    const course = real?.status === 'ok'
+      ? { heading_deg: real.value.heading_deg, speed_mps: real.value.speed_mps, at_ms: Date.parse(real.observed_at) }
+      : { heading_deg: v.heading_deg, speed_mps: v.speed_mps, at_ms: fixAt };
     compassCheck.update(heading, E.courseFrom(course, now), now);
     current = E.computeEvacDirections(data, {
       latitude: v.latitude,
@@ -286,7 +362,13 @@ function render() {
       compass_confirmed_at_ms: compassCheck.confirmedAtMs,
       exclusions,
       ...(simulated || loc.source === 'simulated' ? { source: 'simulated' } : {}),
-    }, { now });
+    }, {
+      now,
+      // In a demo the position is a fixed demo point, so the arrow never
+      // leads anyone anywhere; a heading without an accuracy value (Android)
+      // is not checked against walking there. Real use keeps the check.
+      ...(ctx?.position ? { requireConfirmationWhenAccuracyUnknown: false } : {}),
+    });
   }
   exclusions = evacOk ? E.activeExclusions(exclusions, now) : [];
   const m = evacViewModel({ scenario, lifted, context: ctx, location: loc, dataError, result: current, nowMs: now });
@@ -302,7 +384,12 @@ function render() {
   const resultFacing = current?.status === 'ok' ? current.value.heading.true_heading_deg : null;
   const facing = Number.isFinite(resultFacing) ? resultFacing
     : heading?.status === 'ok' ? heading.value.true_heading_deg : null;
+  // What the compass may follow between redraws: only what this redraw
+  // accepted (heading up). A north-up figure never turns.
+  liveView = null;
   if (m.mode === 'arrow') {
+    const c0 = current?.status === 'ok' ? current.value.candidates[0] : null;
+    liveView = c0 && Number.isFinite(c0.bearing_deg) ? { kind: 'arrow', bearing: c0.bearing_deg } : null;
     compass.set({ kind: 'arrow', headingUp: true, dialDeg: -facing, arrowDeg: m.arrowDeg, facingDeg: facing,
       label: `上の矢印が向いている方角（${facingText(facing)}）。避難場所は${arrowLabel(m.arrowDeg)}` });
     fig.dataset.kind = 'arrow';
@@ -314,12 +401,18 @@ function render() {
     fig.dataset.deg = String(m.northUpBearing);
   } else {
     const headingUp = Number.isFinite(facing);
+    if (headingUp) liveView = { kind: 'none' };
     compass.set({ kind: 'none', headingUp, dialDeg: headingUp ? -facing : 0, facingDeg: facing,
       label: headingUp ? `上の矢印が向いている方角（${facingText(facing)}）` : '北を上にした方位の図。向いている方角が分かりません' });
     fig.dataset.kind = 'none';
     delete fig.dataset.deg;
   }
   $('facing').textContent = Number.isFinite(facing) ? facingText(facing) : orientation ? '分かりません' : '—';
+  // Visible, not folded: the north-up figure is on purpose, not an old screen.
+  const northUp = m.mode === 'text' && m.northUpBearing !== null;
+  setText('compass-state', northUp
+    ? `北が上の図です（方位を確かめられないため）。${/GPS の進行方向/.test(m.arrowReason ?? '') ? 'スマートフォンの上を進む方向に向けて少し歩くと、回る図に戻ります。' : ''}`
+    : '');
   setText('evac-figure-caption', m.mode === 'text' && m.northUpBearing !== null ? '避難目標が出ているときに向きを確かめられないと、北を上にした図にします（点と点線が避難場所の方向です）。' : '');
   setText('evac-arrow-reason', m.arrowReason);
 
@@ -339,22 +432,7 @@ function render() {
   setText('evac-position-age', m.positionAgeText);
 
   $('evac-exclude').disabled = !m.canExclude;
-  const ex = $('evac-exclusions');
-  ex.replaceChildren(...m.exclusions.map((x) => {
-    const li = document.createElement('li');
-    li.append(`除外中：${x.text} `);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'evac-undo';
-    b.textContent = '取り消す';
-    b.addEventListener('click', () => {
-      exclusions = exclusions.filter((e) => !(e.until_ms === x.until_ms && e.center_deg === x.center_deg));
-      render();
-    });
-    li.append(b);
-    return li;
-  }));
-  $('evac-exclusions-wrap').hidden = m.exclusions.length === 0;
+  renderExclusions(now);
 
   const others = $('evac-others');
   others.replaceChildren(...m.others.map((t) => {
@@ -372,6 +450,50 @@ function render() {
     $('demo-info').hidden = false;
   }
   renderHeights(m);
+}
+
+// ---------------------------------------------------------------- blocked directions
+
+const hhmm = (ms) => {
+  const t = new Date(ms + 9 * 3600 * 1000);
+  return `${String(t.getUTCHours()).padStart(2, '0')}:${String(t.getUTCMinutes()).padStart(2, '0')}`;
+};
+
+// "▶現在通れない方向": time, direction, cancel. Each one is cancelled by
+// itself after 10 minutes (modules/evac EXCLUSION_DEFAULTS).
+function renderExclusions(now) {
+  const list = evacOk ? E.activeExclusions(exclusions, now) : [];
+  compass.setExclusions(list);
+  const key = list.map((x) => `${x.center_deg}|${x.until_ms}`).join(',');
+  const ul = $('evac-exclusions');
+  if (ul.dataset.key === key && ul.childElementCount) return;
+  ul.dataset.key = key;
+  $('evac-exclusions-summary').textContent = list.length ? `現在通れない方向（${list.length}）` : '現在通れない方向';
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'excl-empty';
+    li.textContent = 'ありません。';
+    ul.replaceChildren(li);
+    return;
+  }
+  ul.replaceChildren(...list.map((x) => {
+    const li = document.createElement('li');
+    const t = document.createElement('time');
+    t.textContent = hhmm(x.created_ms);
+    const d = document.createElement('span');
+    d.textContent = E.compassName(x.center_deg);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'evac-undo';
+    b.textContent = '取り消し';
+    b.setAttribute('aria-label', `${hhmm(x.created_ms)} ${E.compassName(x.center_deg)} を取り消し`);
+    b.addEventListener('click', () => {
+      exclusions = exclusions.filter((e) => e !== x);
+      render();
+    });
+    li.append(t, d, b);
+    return li;
+  }));
 }
 
 // ---------------------------------------------------------------- heights and map link
@@ -407,6 +529,8 @@ function renderHeights(m) {
   $('here-elev').textContent = elevationShort(ctx?.here ?? { status: 'none' });
   $('here-warn').hidden = !hereRow?.warn;
   $('here-warn').textContent = hereRow?.warn ? `⚠️${hereRow.warnText}` : '';
+  // The note only while tsunami information is shown.
+  $('heights-note').hidden = !ctx?.tsunamiInfo;
   const dl = $('heights-rows');
   dl.replaceChildren(...view.rows.flatMap((r) => {
     const dt = document.createElement('dt');
@@ -428,7 +552,7 @@ function renderHeights(m) {
   if (ctx?.here?.status === 'ok' && ctx.here.source) srcs.push(`いる場所：${ctx.here.source}`);
   srcs.push('予想・観測された津波の高さ：気象庁の発表（デモでは記録・模擬の値）。⚠️は予想と実測の高いほうと比べています');
   $('heights-source').textContent = `${srcs.join('。')}。`;
-  const url = mapRouteUrl(coords);
+  const url = mapSiteUrl(coords);
   $('evac-map-wrap').hidden = !url || m.mode === 'message';
   if (url) $('evac-map-link').href = url;
   globalThis.__handoffSources = {
@@ -451,7 +575,8 @@ function fillStatic() {
       a.rel = 'noopener noreferrer';
       a.target = '_blank';
       a.textContent = l.label;
-      li.append(a); // site name and link only
+      li.append(a); // site name and link only; private sites say so
+      if (l.kind === 'private') li.append('（民間）');
       return li;
     }));
   }
@@ -470,6 +595,35 @@ function fillDataNotes() {
   $('evac-attribution').textContent = `${data.attribution}。${data.processed}。`;
   return true;
 }
+
+// ---------------------------------------------------------------- the compass between redraws
+
+// Heading up only: the dial and the target follow the latest heading every
+// LIVE_MS. Nothing is sent anywhere; this only reads the device sensors.
+// tracker.latest() skips the 1 s stability check of tracker.read(): the
+// figure follows the phone as it turns. Whether the figure is heading up at
+// all is still decided by render() once a second with tracker.read().
+let liveView = null;
+let lastLive = 0;
+function liveTick(t) {
+  requestAnimationFrame(liveTick);
+  if (!liveView || !orientation || !tracker || t - lastLive < LIVE_MS) return;
+  lastLive = t;
+  const loc = locSensor ? locSensor.read() : null;
+  const here = context?.position ?? (loc?.status === 'ok' ? loc.value : { latitude: 36, longitude: 138 });
+  const h = tracker.latest({
+    nowMs: Date.now(),
+    screenAngleDeg: E.currentScreenAngle(),
+    declinationWestDeg: E.declinationWestDeg(here.latitude, here.longitude),
+  });
+  if (h?.status !== 'ok') return;
+  const facing = h.value.true_heading_deg;
+  const arrowDeg = liveView.kind === 'arrow' ? E.screenArrowDeg(liveView.bearing, h.value) : null;
+  if (liveView.kind === 'arrow' && !Number.isFinite(arrowDeg)) return;
+  compass.live({ dialDeg: -facing, arrowDeg });
+  $('facing').textContent = facingText(facing);
+}
+if (typeof requestAnimationFrame === 'function') requestAnimationFrame(liveTick);
 
 fillStatic();
 let notesFilled = false;

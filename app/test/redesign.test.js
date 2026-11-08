@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { heightsView, lowerThanForecast, mapRouteUrl, elevationText, TERRAIN_NOTE, MAP_ROUTE_NOTE } from '../shell/heights.js';
+import { heightsView, lowerThanForecast, mapSiteUrl, elevationText, TERRAIN_NOTE, MAP_NOTE } from '../shell/heights.js';
 import { createHistory, entriesFromItems, disasterStartMs } from '../shell/history.js';
 import { readConsent, writeConsent, CONSENT_TEXT, CONSENT_STOP } from '../shell/consent.js';
 import { CONTACT_GROUPS, CHECKED, telHref } from '../shell/contacts.js';
@@ -64,12 +64,12 @@ test('heights: the terrain note is always there; never "safe"', () => {
   assert.equal(elevationText({ status: 'ok', value_m: 1.44 }), '約 1.4 m');
 });
 
-test('map link: official Google Maps URL format, walking, destination only, no key', () => {
-  const u = mapRouteUrl({ latitude: 34.861234, longitude: 138.321234 });
-  assert.equal(u, 'https://www.google.com/maps/dir/?api=1&destination=34.86123%2C138.32123&travelmode=walking');
-  assert.doesNotMatch(u, /origin|key=/);
-  assert.equal(mapRouteUrl(null), null);
-  assert.match(MAP_ROUTE_NOTE, /通れない道や浸水を考えていません/);
+test('map link: GSI map centred on the site, zoom 15, no route, no position', () => {
+  const u = mapSiteUrl({ latitude: 34.861234, longitude: 138.321234 });
+  assert.equal(u, 'https://maps.gsi.go.jp/#15/34.861234/138.321234/');
+  assert.doesNotMatch(u, /google|dir|origin|key=/);
+  assert.equal(mapSiteUrl(null), null);
+  assert.equal(MAP_NOTE, '地図アプリの経路は通れない道を反映していません');
 });
 
 test('forecast height: from C-A items or the demo, for the nearest coast region only', () => {
@@ -159,7 +159,7 @@ test('consent: one consent, stored, withdrawn; the text says what is sent and ho
   assert.match(all, /標高 API/);
   assert.match(all, /津波浸水想定/);
   assert.match(all, /公的な基準ではありません/);
-  assert.match(CONSENT_STOP, /同意をやめる/);
+  assert.match(CONSENT_STOP, /「同意しない」を選んで/);
 });
 
 test('contacts: national always first, the four demo places, sources and the checked date', () => {

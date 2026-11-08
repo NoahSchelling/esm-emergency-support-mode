@@ -118,3 +118,33 @@ test('shell sources: no innerHTML, no external imports, position never in a URL'
     assert.doesNotMatch(src, /fetch\([^)]*(latitude|longitude|lat=|lon=)/, f);
   }
 });
+
+test('real messages: tsunami lifts and forecasts are not "in effect"; warnings stay after they leave "recent"', async () => {
+  const { isTsunamiAnnouncement, currentFacts, forecastHeightFor } = await import('../shell/live.js');
+  const { recordTimeMs } = await import('../shell/demos.js');
+  for (const n of ['大津波警報', '大津波警報：発表', '津波警報', '津波注意報', '津波警報（大津波）']) assert.equal(isTsunamiAnnouncement({ name: n }), true, n);
+  for (const n of ['警報解除', '津波注意報解除', '津波なし', '津波予報（若干の海面変動）']) assert.equal(isTsunamiAnnouncement({ name: n }), false, n);
+  assert.equal(isTsunamiAnnouncement({ name: '津波警報', status: '解除' }), false);
+  const near = nearestCoast(coast, 34.86, 138.32);
+  const h = { description: '０．２ｍ未満', value_m: 0.2, unbounded: false };
+  assert.equal(forecastHeightFor([{ area_code: '380', kinds: [{ name: '津波予報（若干の海面変動）' }], max_height: h }], near), null);
+  assert.equal(tsunamiWarningFor([{ area_code: '380', kinds: [{ name: '警報解除' }] }], near), null);
+  // "current" keeps the tsunami warning even when ten newer messages came later
+  const msg = (title, author, t, kinds, area = '380') => ({ title, author, detail: { title, status: '通常', report_datetime: t, items: [{ area_code: area, kinds }] } });
+  const st = {
+    recent: Array.from({ length: 10 }, (_, i) => msg('気象警報・注意報（Ｒ０６）', `office${i}`, 2000 + i, [{ name: '大雨警報' }], String(i))),
+    current: [msg('津波警報・注意報・予報a', '気象庁', 1000, [{ name: '大津波警報' }]), msg('気象警報・注意報（Ｒ０６）', '静岡地方気象台', 1500, [{ name: '大雨警報' }], '2210001')],
+    source: { mode: 'live' },
+  };
+  const names = itemsFromStatus(st).items.map((i) => i.kinds[0].name);
+  assert.ok(names.includes('大津波警報'));
+  // the newest tsunami message wins, whatever its title (warnings or information)
+  st.current.push(msg('津波情報a', '気象庁', 1200, [{ name: '津波警報' }]));
+  assert.deepEqual(itemsFromStatus(st).items.filter((i) => i.area_code === '380').map((i) => i.kinds[0].name), ['津波警報']);
+  // an observation counts only after the announcement in effect was issued
+  const items = [{ area_code: '250', time: '2011-03-12 20:20', kinds: [{ name: '津波警報（津波）' }] }];
+  const facts = [{ type: 'tsunami-obs', region: '250', time: '2011-03-11 15:51', height: '9.3m以上' }, { type: 'quake', time: '2011-03-11 14:46' }];
+  assert.deepEqual(currentFacts(facts, items, recordTimeMs).map((f) => f.type), ['quake']);
+  assert.equal(currentFacts(facts, [{ ...items[0], time: '2011-03-11 15:30' }], recordTimeMs).length, 2);
+  assert.equal(currentFacts(facts, [], recordTimeMs).length, 1); // nothing in effect: no observation
+});

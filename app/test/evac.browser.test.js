@@ -178,9 +178,10 @@ test('default is the evacuee view; switching is manual only', { skip }, async (t
   assert.equal(await page.isVisible('#view-evac'), true);
 });
 
-test('evacuee view has no input fields', { skip }, async (t) => {
+test('evacuee view has no input fields (one toggle switch only)', { skip }, async (t) => {
   const { page } = await open(t);
-  assert.equal(await page.locator('#view-evac input, #view-evac textarea, #view-evac select').count(), 0);
+  assert.equal(await page.locator('#view-evac textarea, #view-evac select, #view-evac input:not([type=checkbox])').count(), 0);
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#view-evac input')].map((e) => `${e.id}|${e.getAttribute('role')}`)), ['evac-start|switch']);
 });
 
 test('no scenario: no site is picked; says why and where to check', { skip }, async (t) => {
@@ -194,6 +195,8 @@ test('no scenario: no site is picked; says why and where to check', { skip }, as
   // site names and links only (no descriptions)
   assert.match(s.text, /地理院地図（指定緊急避難場所）/);
   assert.doesNotMatch(s.text, /民間のサイトです/);
+  // private sites keep a short mark next to the name
+  assert.match(s.text, /Yahoo!天気・災害 避難場所マップ（静岡県）（民間）/);
   // no target: the straight-line note is not needed
   assert.match(s.text, /避難目標\s*なし/);
   assert.equal(await page.isVisible('#evac-straight'), false);
@@ -397,15 +400,25 @@ test('"通れない": excludes the direction, shows it, and can be undone', { sk
   const after = s.result.value.candidates[0];
   assert.notEqual(after.id, before.id);
   assert.ok(!s.result.value.candidates.some((c) => c.id === before.id));
-  assert.match(s.text, /除外中：北から約 \d+ 度/);
-  assert.match(s.text, /まで）/);
+  // a cross on the rim of the compass, in the dial (it turns with it)
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.c-dial .c-excl-mark').length), 1);
+  assert.equal(await page.evaluate(() => document.querySelector('.compass-svg').dataset.exclusions), '1');
+  // "▶現在通れない方向" (14pt), folded: time, direction, cancel
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#evac-exclusions-summary')).fontSize), '18.6667px');
+  await page.click('#evac-exclusions-summary');
+  const row = await page.textContent('#evac-exclusions li');
+  assert.match(row, /^\d{2}:\d{2}[北東南西]{1,3}取り消し$/);
   assert.match(s.text, /あなたの判断です/);
+  assert.match(s.text, /10 分たつと自動で取り消します/);
+  // the button sits under the elevation card
+  assert.equal(await page.evaluate(() => document.getElementById('heights').nextElementSibling.id), 'evac-exclude');
   await shot(page, 'evac-excluded-375-light');
   await page.click('.evac-undo');
   await page.waitForTimeout(400);
   const s3 = await state(page);
   assert.equal(s3.result.value.candidates[0].id, before.id);
-  assert.doesNotMatch(s3.text, /除外中/);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.c-excl-mark').length), 0);
+  assert.match(await page.textContent('#evac-exclusions'), /ありません/);
 });
 
 test('outside the data: unknown, "not found in the data", fallback links', { skip }, async (t) => {

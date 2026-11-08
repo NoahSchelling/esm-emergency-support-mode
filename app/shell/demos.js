@@ -43,7 +43,7 @@ export const DEMOS = Object.freeze({
     lookup: { elevation_m: 1.4, elevation_source: '1m（レーザ）', inundation: true, checked: '2026-11-07' },
     hasEvacData: true,
     hazardOnTsunami: 'tsunami',
-    stepMs: 8000,
+    stepMs: 9000,
     sources: [],
     // Simulated hours since the (simulated) disaster, so the replay can show
     // how the handoff guide grows with the stages of modules/mode.
@@ -70,7 +70,7 @@ export const DEMOS = Object.freeze({
     lookup: { elevation_m: 5.9, elevation_source: '国土地理院の標高 API', inundation: true, checked: '2026-11-07' },
     hasEvacData: false,
     hazardOnTsunami: 'tsunami',
-    stepMs: 6000,
+    stepMs: 7000,
     sources: [
       '気象庁「災害時地震・津波速報 平成23年（2011年）東北地方太平洋沖地震」 https://www.jma.go.jp/jma/kishou/books/saigaiji/saigaiji_201101/saigaiji_201101_01.pdf',
       '同「7．気象官署のとった措置」 https://www.jma.go.jp/jma/kishou/books/saigaiji/saigaiji_201101/saigaiji_201101_07.pdf',
@@ -99,7 +99,7 @@ export const DEMOS = Object.freeze({
     lookup: { elevation_m: 3.1, elevation_source: '国土地理院の標高 API', inundation: true, checked: '2026-11-07' },
     hasEvacData: false,
     hazardOnTsunami: null,
-    stepMs: 7000,
+    stepMs: 8000,
     sources: [
       '千葉市「令和元年台風第15号・第19号及び10月25日の大雨に関する災害記録誌」第2章・第3章 https://www.city.chiba.jp/sogoseisaku/kikikanri/kikikanri/documents/saigaikirokushi_no3.pdf',
       '千葉県「令和元年台風第15号等の災害対応検証報告書」第2章 https://www.pref.chiba.lg.jp/gyoukaku/press/2019/documents/houkokusyo2-2.pdf',
@@ -123,7 +123,7 @@ export const DEMOS = Object.freeze({
     lookup: { elevation_m: 40.7, elevation_source: '国土地理院の標高 API', inundation: null, checked: '2026-11-07' },
     hasEvacData: false,
     hazardOnTsunami: null,
-    stepMs: 6000,
+    stepMs: 7000,
     sources: [
       '練馬区 区議会資料（2019年10月16日） https://www.city.nerima.tokyo.jp/kusei/kaigi/chogi/h31/tyougi011016.files/siryout-5-3.pdf',
       '気象庁「災害をもたらした気象事例の速報 令和元年東日本台風」 https://www.jma.go.jp/jma/kishou/know/jirei/sokuhou/R011012.pdf',
